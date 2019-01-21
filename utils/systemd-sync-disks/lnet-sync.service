@@ -1,0 +1,21 @@
+## live-net-initramfs - System Configuration Components
+##
+## live-net-initramfs contains the components that configure a live system during
+## the boot process (late userspace).
+##
+## This is the systemd service for live-net-initramfs.
+
+[Unit]
+Description=Synchronize disks on shutdown
+DefaultDependencies=no
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/usr/sbin/lnet-sync "ro"
+RemainAfterExit=yes
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=basic.target

@@ -1,0 +1,195 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# Input:
+# Global Variable JA_CMD: jobadmin function name
+# Global Variable JA_NOEXTRAOPTIONS: do not show help or assist parameters
+# Exit:
+# returns 0 and sets array JA_CMD_ARGS or print variable values.
+# returns 1 when cancelled or error.
+
+_jobadmin_parms() {
+	local JA_CMD="${1}"
+	local line DIALOG
+	local defaultval rc res i line
+	local option optiontype varname choicelist defaultvalue
+
+	JA_DIALOG_FIELDS="Param_Name:20 Value:20:30 Description:20 ChoiceList:30"
+	JA_DIALOG_COMMANDS="Enter Values, press Enter:"
+	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F5 F12")"
+
+	M="${M0}"
+	while :; do
+		rc=0
+		line=1
+		i=0
+		_dialog_init
+		DIALOG="$(_dialog_header "${JA_ASSIST_NAME}:${JA_CMD}")"
+		unset option optiontype varname choicelist defaultvalue
+		while read option optiontype varname choicelist defaultvalue; do
+			[ -n "${varname}" ] || continue
+			if awk -v o="${optiontype}" 'BEGIN{exit o !~ "[i]"}'; then
+				choicelist="Yes,No"
+			elif awk -v o="${optiontype}" 'BEGIN{exit o ~ "[ch]"}'; then
+				choicelist=""
+			fi
+			i=$((${i}+1))
+
+			m="$(_print_line "${i}" <<< "${M}")\
+$(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}")"
+
+			optname="$( awk -v var="${varname}" -v o="${optiontype}" \
+				'$1 == var {for (v=6; v<=NF;v++) a = a $v " "; exit}
+				END{ a=substr(a,1,18)
+					while (length(a) < 18) a = a ". "
+					if (o ~ "[r]") a = a ">"
+					print a }' "${JA_CONF_PARMS}" )"
+			DIALOG="${DIALOG}$(_dialog_line "${optname}" "${m}" \
+				"${option}" "${choicelist}")"
+			line=$((${line}+2))
+			unset option optiontype varname choicelist defaultvalue
+		done < <(tr -s "@" '\n' <<< "${options_getopt}")
+		# show dialog
+		rc=0
+		M="$(_dialog_exec "${JA_CONF_DLG_F4}")" || rc="${?}"
+		cont="y"
+		_lastkey_detect "$(tail --lines=1 <<< "${M}")"
+		M="$(head --lines=-1 <<< "${M}" | \
+			tr "'" '"' | \
+			sed -re '\|^[[:blank:]]+| s|||
+			\|[[:blank:]]+$| s|||')"
+		case "${rc}" in
+		0) # OK
+			i=0
+			JA_CMD_ARGS=()
+			unset option optiontype varname choicelist defaultvalue
+			while read option optiontype varname choicelist defaultvalue; do
+				[ -n "${varname}" ] || \
+					continue
+				i=$((${i}+1))
+				m="$(_print_line "${i}" <<< "${M}")"
+				if [ -n "${m}" ]; then
+					if echo "${optiontype}" | grep -qse "m"; then
+						JA_CMD_ARGS+=( $(echo "$(cut -f 2 -d ',' <<< "${option}")" \
+							"${m}") )
+					else
+						JA_CMD_ARGS+=( "$(cut -f 2 -d ',' <<< "${option}")" \
+							"$(_print_param "${m}")" )
+					fi
+				fi
+				unset option optiontype varname choicelist defaultvalue
+			done < <(tr -s "@" '\n' <<< "${options_getopt}")
+
+			rc=0
+			if res="$(tr -s '@' '\n' <<< "${options_getopt}-h,--help i JA_HELP" | \
+			getopt-sh "${JA_CMD_ARGS[@]:-}")" || \
+			grep -qse "^JA_HELP=.*Yes" <<< "${res}"; then
+				rc=0
+				break
+			else
+				_usr_notify "$(_getopt_errors "${res}")" "" "y"
+			fi
+			;;
+		2) # Help
+			if [ -n "${JA_FKEY_DSPMSG}" ]; then
+				if _cmd_dsc "dspmsg"; then
+					JA_CMD_ARGS=("--msgq" "$(basename "${JA_DIALOG_TAILBOXMSG}" ".msgq")")
+					_cmd_exec || :
+				fi
+			else
+				_usr_notify "$(_usage "${JA_CMD}" 2>&1)" "" "y"
+				awk '$5 != "-" && $6 != "-" {print $2" "$6"="$1}' \
+					"${JA_CONF_CMDS}" | sort | \
+					awk 'BEGIN{a = ""} {
+					printf $2", "; if (a != "" && $1 != a) {a = "$1"; printf "\n"}}
+					END{printf "\n"}' >> "${JA_DIALOG_TAILBOXMSG}"
+			fi
+			;;
+		3) # Extra-button/Refresh
+			M="${M0}"
+			;;
+		4) # Item-Help
+			# TODO: Help for every function
+			_usr_notify "$(_usage "${JA_CMD}" 2>&1)" "" "y"
+			# unset M options
+			;;
+		*) # 1=Cancel 255=Esc
+			rc=1
+			break
+			;;
+		esac
+	done
+	_dialog_end
+
+	[ "${rc}" = 0 ] || \
+		return "${rc}"
+
+	if [ -z "${JA_NOEXTRAOPTIONS}" ]; then
+		echo "JA_CMD_ARGS=( $(_print_cmd "${JA_CMD_ARGS[@]}") )"
+	else
+		for varname in $(awk 'BEGIN{RS="[@\n]"}
+		$3 {print $3}' <<< "${options_getopt}"); do
+			grep -se "^${varname}=" <<< "${res}" || :
+		done
+	fi
+	:
+} # _jobadmin_parms
+
+_jobadmin_parms_vars() {
+	local M0 options_getopt res
+	local option optiontype varname rest
+	local JA_CMD JA_ASSIST_OBJ JA_ASSIST_NAME
+	local JA_CMD_CMD JA_CMD_OBJ JA_CMD_NAME JA_NOEXTRAOPTIONS
+
+	_dialog_end
+
+	if _cmd_dsc "${JA_MODULE}"; then
+		JA_CMD="${JA_CMD_CMD}"
+		JA_ASSIST_OBJ="${JA_CMD_OBJ}"
+		JA_ASSIST_NAME="${JA_CMD_NAME}"
+	fi
+	JA_NOEXTRAOPTIONS="Yes"
+	options_getopt="$(_options_getopt "${JA_OPTIONS}" \
+		"${JA_MODULE}" "${JA_NOEXTRAOPTIONS:-}")"
+	M0=""
+	unset option optiontype varname rest
+	while read option optiontype varname rest; do
+		[ -n "${varname}" ] || \
+			continue
+		eval "$(printf '%s' "m=\${${varname}}")"
+		M0="${M0}${m}"$'\n'
+		unset option optiontype varname rest
+	done < <(tr -s "@" '\n' <<< "${options_getopt}")
+
+	if res="$(_jobadmin_parms "${JA_CMD}")"; then
+		eval ${res}
+		_${JA_MODULE}_refresh
+	fi
+	:
+}

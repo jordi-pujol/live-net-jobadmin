@@ -1,0 +1,51 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# hold a subsystem
+
+_hldsbs_options="JA_SBSD rp"
+
+_hldsbs() {
+	local hld sts
+
+	if hld="$(_read_option "JA_HLD" "${JA_SPOOL}${JA_SBSD}.sbsd.attrs")"; then
+		sts="$(_read_option "JA_SBSD_STS" "${sbsd}")" || :
+		_usr_notify "Warning: ${sts:+"Stopped"}${sts:-"Active"} subsystem '${JA_SBSD}' is already held$(test "${hld}" = "HLD" || \
+		printf " by a pwrdwnsys procedure")."
+		[ "${hld}" != "HLD" ] || \
+			return 0
+	fi
+
+	if _set_option "${JA_SPOOL}${JA_SBSD}.sbsd.attrs" "JA_HLD" "HLD"; then
+		_usr_notify "${hld:+"Manually "}Holding subsystem '${JA_SBSD}'."
+	else
+		_usr_notify "Error: Not authorized to hold subsystem '${JA_SBSD}'."
+		return 1
+	fi
+} # hldsbs

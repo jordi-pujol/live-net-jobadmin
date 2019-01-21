@@ -1,0 +1,272 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# file:    jobadmin.conf
+#
+
+if [ -z "${JA_CGEXEC:+"${JA_CGEXEC}"}" ]; then
+
+# interactive jobadmin commands work in xterm tabs,
+# and also in a console or an xterm without tabs.
+
+# command to view and edit a job command script in an X screen;
+JA_XCMDEDIT=""
+if xset -q > /dev/null 2>&1; then
+	! editor="$(which geany)" || \
+		JA_XCMDEDIT="$editor --no-session --new-instance --read-only"
+fi
+
+# x-terminal-emulator
+# xfce4-terminal is preferred, you must use it if possible.
+#
+# set the key sequence to create a new tab and change to it
+# define this and xdotool will create new tabs on any xterm
+#JA_KEY_NEWTAB=""
+# xterm: apt-get install suckless-tools, then run this command to have a tabbed xterm:
+# tabbed -c xterm -into
+#JA_KEY_NEWTAB="ctrl+shift+Enter"
+# konsole:
+#JA_KEY_NEWTAB="ctrl+shift+n"
+# key's combination for qterminal, lxterminal, gnome-terminal
+JA_KEY_NEWTAB=""
+# when working in an xterm, open commands in a new tab
+JA_XTERM_TABS=""
+JA_KONSOLE=""
+JA_KONSOLE_NOCLOSE=""
+if term="$(readlink -f "$(which x-terminal-emulator)")"; then
+	JA_XTERM_TABS="Yes"
+	JA_KEY_NEWTAB="ctrl+shift+t"
+	# hacking a possible bug in xfce4-terminal-wrapper that makes it not work correctly
+	! echo "${term}" | grep -qse "xfce4-terminal" || \
+		term="$(which xfce4-terminal)"
+	# similar behaviour with xfce4-terminal-wrapper for mate-terminal-wrapper
+	! echo "${term}" | grep -qse "mate-terminal" || \
+		term="$(which mate-terminal)"
+	# keys doesn't work for some versions of xfce4-terminal
+	# also in xfce4-terminal xdotool has a weird behaviour
+	! echo "${term}" | \
+	grep -qsEe "(mate|xfce4)-terminal" || \
+		JA_KEY_NEWTAB=""
+	# JA_KONSOLE is used only when the key sequence is blank
+	if [ -z "${JA_KEY_NEWTAB:-}" ]; then
+		# command for a konsole new tab,
+		# <pwd> will be replaced by current program workdir
+		# A terminal that works with tabs is preferred.
+		# in KDE4 use konsole to work with each command in a separate TAB
+		# in GNOME, XFCE and LXDE the preferred choice is xfce4-terminal
+		# JA_KONSOLE='gnome-terminal --tab --working-directory="$(pwd)" -e jobadmin-command'
+		if echo "${term}" | grep -qse "konsole"; then
+			JA_KONSOLE=${term}' --new-tab -T "TITLE" --workdir "$(pwd)" -e'
+			JA_KONSOLE_NOCLOSE=${term}' --new-tab -T "TITLE" --noclose --workdir "$(pwd)" -e'
+		elif echo "${term}" | grep -qse "xfce4-terminal"; then
+			JA_KONSOLE=${term}' --tab --title="TITLE" --working-directory="$(pwd)" --execute'
+			JA_KONSOLE_NOCLOSE=${term}' --tab --title="TITLE" --hold --working-directory="$(pwd)" --execute'
+		elif echo "${term}" | grep -qse "mate-terminal"; then
+			JA_KONSOLE=${term}' --tab --title="TITLE" --working-directory="$(pwd)" -e'
+			# option noclose is not available in this emulator ?
+			JA_KONSOLE_NOCLOSE=${term}' --tab --title="TITLE" --working-directory="$(pwd)" -e'
+		elif echo "${term}" | grep -qse "gnome-terminal"; then
+			JA_KONSOLE=${term}' --working-directory="$(pwd)" -x'
+			JA_KONSOLE_NOCLOSE=${term}' --working-directory="$(pwd)" -x'
+		elif echo "${term}" | grep -qse "lxterminal"; then
+			JA_KONSOLE=${term}' --working-directory="$(pwd)" -e'
+			JA_KONSOLE_NOCLOSE=${term}' --working-directory="$(pwd)" -e'
+		else
+			JA_KONSOLE=${term}' -e'
+			JA_KONSOLE_NOCLOSE=${term}' -e'
+		fi
+	fi
+fi
+readonly JA_XTERM_TABS JA_KEY_NEWTAB JA_KONSOLE JA_KONSOLE_NOCLOSE
+
+# when sending a message to the X screen via libnotify
+# send also the message to the active xterm
+# values: Yes or blank
+#JA_MSG_XTERM="Yes"
+JA_MSG_XTERM=""
+readonly JA_MSG_XTERM
+
+if [ -d "/run/systemd/system" ]; then
+	JA_CGEXEC="systemd-run --slice=@CGRP --uid=@USR --unit=@JOB_@USR \
+@RUNPROPS \
+/usr/bin/screen -DmS @JOB /usr/sbin/jobadmind --exec @JOB.@USR"
+	JA_CGEXEC_INTER="systemd-run --user --scope --slice=@CGRP --unit=@JOB_@USR \
+@RUNPROPS \
+/usr/sbin/jobadmind --exec @JOB.@USR" 
+else
+	JA_CGEXEC="sudo -u @USR -- cgexec -g @CGRP \
+/usr/bin/screen -dmS @JOB /usr/sbin/jobadmind --exec @JOB.@USR"
+	JA_CGEXEC_INTER="setsid \
+env -i JA_JOB=@JOB JA_USR=@USR JA_CGRP=@CGRP JA_DAEMON=/usr/sbin/jobadmind \
+/sbin/getty --noreset --autologin @USR --login-program /usr/sbin/jobadmin-autologin tty@TERM"
+fi
+readonly JA_CGEXEC JA_CGEXEC_INTER
+
+# Power management commands are executed by the jobadmin daemon, user root
+# KDE4, ConsoleKit, UPower
+# JA_CMD_POWEROFF='dbus-send --system --print-reply --dest="org.freedesktop.ConsoleKit" /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Stop'
+# JA_CMD_REBOOT='dbus-send --system --print-reply --dest="org.freedesktop.ConsoleKit" /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Restart'
+# JA_CMD_HIBERNATE='dbus-send --system --print-reply --dest="org.freedesktop.UPower" /org/freedesktop/UPower org.freedesktop.UPower.Hibernate'
+# JA_CMD_SUSPEND='dbus-send --system --print-reply --dest="org.freedesktop.UPower" /org/freedesktop/UPower org.freedesktop.UPower.Suspend'
+# JA_CMD_SUSPEND='dbus-send --system --print-reply --dest=org.freedesktop.PowerManagement /org/freedesktop/PowerManagement org.freedesktop.PowerManagement.Suspend'
+
+# please comment out the actions that should not be performed in this computer.
+# https://www.kernel.org/doc/Documentation/power/states.txt
+if [ -d "/run/systemd/system" ]; then
+	JA_CMD_POWEROFF='systemctl poweroff'
+	JA_CMD_POWEROFF_IMMED='systemctl poweroff --ignore-inhibitors'
+	JA_CMD_HALT='systemctl halt'
+	JA_CMD_HALT_IMMED='systemctl halt --ignore-inhibitors'
+	JA_CMD_REBOOT='systemctl reboot'
+	JA_CMD_REBOOT_IMMED='systemctl reboot --ignore-inhibitors'
+	if grep -qswe 'disk' /sys/power/state; then
+		JA_CMD_HIBERNATE='systemctl hibernate'
+		JA_CMD_HIBERNATE_IMMED='systemctl hibernate --ignore-inhibitors'
+	else
+		JA_CMD_HIBERNATE=""
+		JA_CMD_HIBERNATE_IMMED=""
+	fi
+	if grep -qswE "mem|standby|freeze" /sys/power/state; then
+		JA_CMD_SUSPEND='systemctl suspend'
+		JA_CMD_SUSPEND_IMMED='systemctl suspend --ignore-inhibitors'
+	else
+		JA_CMD_SUSPEND=""
+		JA_CMD_SUSPEND_IMMED=""
+	fi
+elif [ -x "/usr/sbin/pm-hibernate" ]; then # pm
+	JA_CMD_POWEROFF='poweroff'
+	JA_CMD_HALT='shutdown -h now'
+	JA_CMD_REBOOT='shutdown -r now'
+	JA_CMD_HIBERNATE='pm-is-supported --hibernate && pm-hibernate'
+	# JA_CMD_SUSPEND='pm-is-supported --suspend-hybrid && pm-suspend-hybrid'
+	JA_CMD_SUSPEND='pm-is-supported --suspend && pm-suspend'
+elif [ -x "/usr/sbin/s2ram" ]; then # uswsusp
+	JA_CMD_POWEROFF='poweroff'
+	JA_CMD_HALT='shutdown -h now'
+	JA_CMD_REBOOT='shutdown -r now'
+	JA_CMD_HIBERNATE='sync && echo 3 > /proc/sys/vm/drop_caches && s2disk'
+	# JA_CMD_HIBERNATE='s2disk'
+	JA_CMD_SUSPEND='sync && echo 3 > /proc/sys/vm/drop_caches && s2ram'
+	# JA_CMD_SUSPEND='s2ram'
+else # standard system 
+	JA_CMD_POWEROFF='poweroff'
+	JA_CMD_HALT='shutdown -h now'
+	JA_CMD_REBOOT='shutdown -r now'
+# FIXME: not sure about what hibernate and suspend codes could be listed in /sys/power/state
+	JA_CMD_HIBERNATE='! grep -qswe disk /sys/power/state || \
+(echo platform > /sys/power/disk && echo disk > /sys/power/state)'
+	JA_CMD_SUSPEND='if grep -qswE "mem|standby|freeze" /sys/power/state; then \
+echo platform > /sys/power/disk && echo memory > /sys/power/state; \
+elif grep -qswe mem /sys/power/state; then \
+echo platform > /sys/power/disk && echo mem > /sys/power/state; \
+elif grep -qswe standby /sys/power/state; then \
+echo platform > /sys/power/disk && echo standby > /sys/power/state; \
+elif grep -qswe freeze /sys/power/state; then \
+echo platform > /sys/power/disk && echo freeze > /sys/power/state; \
+fi'
+fi
+
+# to poweroff detect active X screensaver, returns true or false
+# qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SetActive true
+#JA_CMD_XSAVER='dbus-send --session --dest=org.freedesktop.ScreenSaver --type=method_call --print-reply /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
+#JA_CMD_XSAVER='qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
+JA_CMD_XSAVER='qdbus org.kde.krunner /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
+
+readonly JA_CMD_POWEROFF JA_CMD_HALT JA_CMD_REBOOT JA_CMD_HIBERNATE \
+	JA_CMD_SUSPEND JA_CMD_XSAVER
+
+# cups server
+JA_CUPS_SERVER=""
+if [ -n "${JA_PROCESS_WTR:-}" ] && \
+[ -s "/etc/cups/cupsd.conf" ]; then
+	host="$(netstat -tln | \
+	awk '$1 == "tcp" {print substr($4,index($4,":"))}' | \
+	while read port; do \
+		lsof -b -i "${port}" | \
+		awk '$1 == "cupsd" {print $9; exit 1}' || break
+	done 2> /dev/null)"
+	[ -n "${host}" ] || \
+	host="$(sed -nre '\|^Listen[[:blank:]]+([^\/*]+:[[:digit:]]+)$| {s||\1|p;q}
+	\|^Listen[[:blank:]]+[*]+(:[[:digit:]]+)$| {s||localhost\1|p;q}
+	\|^Port[[:blank:]]+([[:digit:]]+)$| {s||localhost:\1|p;q}' \
+	"/etc/cups/cupsd.conf")"
+	[ -n "${host}" ] || host="localhost:631"
+	JA_CUPS_SERVER="ipp://${host}/"
+fi
+[ -n "${JA_CUPS_SERVER:-}" ] || \
+	JA_PROCESS_WTR=""
+
+readonly JA_CUPS_SERVER JA_PROCESS_WTR
+
+# set debug indicators
+#
+# debug anywhere
+#JA_DEBUG="yes"
+JA_DEBUG="${JA_DEBUG:-}"
+# 
+# daemon debug
+#JA_DEBUG_DAEMON="yes"
+JA_DEBUG_DAEMON="${JA_DEBUG_DAEMON:-"${JA_DEBUG:-}"}"
+# interactive program debug
+#JA_DEBUG_MODULES="yes"
+JA_DEBUG_MODULES="${JA_DEBUG_MODULES:-"${JA_DEBUG:-}"}"
+# jobs debug
+#JA_DEBUG_EXEC="yes"
+JA_DEBUG_EXEC="${JA_DEBUG_EXEC:-"${JA_DEBUG:-}"}"
+
+# Permission of the group adm to the jobs that belong to users in the root's group.
+# Default is: not authorized to write (or modify) files; therefore:
+# - adm group can not change jobs, even neither status of jobs.
+# - adm group is only authorized to stop root's jobs via the kill command.
+JA_PERM_ROOT="rx"
+
+# first terminal number
+# to use in interactive jobs
+JA_VT_INTER=13
+
+# save commands in bash history
+JA_HISTORY="yes"
+
+# auto refresh for all dialog forms;
+# this is the initial default value,
+# when working in a dialog form, key F17 will switch it interactively.
+JA_AUTOREFRESH="yes"
+
+# verify jobadmin commands before execution;
+# show assistance when the options are invalid.
+JA_CMD_VERIFY="yes"
+# only when working in a terminal
+_terminal_available || JA_CMD_VERIFY=""
+
+readonly JA_DEBUG_DAEMON JA_DEBUG_MODULES JA_DEBUG_EXEC \
+	JA_PERM_ROOT JA_VT_INTER JA_HISTORY JA_AUTOREFRESH JA_CMD_VERIFY
+
+# export LNET_GETOPT_DEBUG=y
+
+fi

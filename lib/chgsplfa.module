@@ -1,0 +1,95 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# chgsplfa
+
+_chgsplfa_options="JA_SPLF pr@
+JA_JOB pr@
+JA_USR@
+JA_PID@
+JA_OUTQ o@
+JA_OUTPTY o@
+JA_SAVED o"
+
+_chgsplfa() {
+	local chgsplfa outpty outq sav fd1
+
+	if ! _test_rw "${JA_SPLF_ATTRS}"; then
+		_usr_notify "Error: Not authorized to change spool file attributes '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}'."
+		return 1
+	fi
+
+	chgsplfa=""
+	if [ -n "${JA_OUTQ}" ]; then
+		if _outq_dsc "${JA_OUTQ}"; then
+			outq="$(_read_option "JA_OUTQ" "${JA_SPLF_ATTRS}")" || :
+			[ "${JA_OUTQ}" != "${outq}" ] && \
+			chgsplfa="${chgsplfa}
+JA_OUTQ ${JA_OUTQ}" || :
+		else
+			_usr_notify "Error: invalid output queue '${JA_OUTQ}'."
+			return 1
+		fi
+	fi
+
+	if [ -n "${JA_OUTPTY}" ]; then
+		outpty="$(_read_option "JA_OUTPTY" "${JA_SPLF_ATTRS}")" || :
+		[ "${JA_OUTPTY}" = "${outpty}" ] || \
+			chgsplfa="${chgsplfa}
+JA_OUTPTY ${JA_OUTPTY}" || :
+	fi
+
+	if [ -n "${JA_SAVED}" ]; then
+		sav="$(_read_option "JA_SAVED" "${JA_SPLF_ATTRS}")" || :
+		[ "${JA_SAVED}" = "Yes" ] || \
+			JA_SAVED=""
+		[ "${JA_SAVED}" = "${sav}" ] || \
+			chgsplfa="${chgsplfa}
+JA_SAVED ${JA_SAVED}" || :
+	fi
+
+	if [ -n "${chgsplfa}" ]; then
+		( if ! flock --shared --timeout 1 ${fd1}; then
+			_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+			return 1
+		fi
+		_usr_notify "Changing spool file attributes '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}'."
+		while read v val; do
+			[ -n "${v}" ] || continue
+			_set_option "${JA_SPLF_ATTRS}" "${v}" "${val}"
+			_usr_notify "$(printf '%s=%s' "${v}" "'${val}'")"
+		done <<< "${chgsplfa}"
+		if _pipe_write "_jobadmin"; then
+			_usr_notify "Done."
+		fi
+		) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+	else
+		_usr_notify "Warning: No changes suggested."
+	fi
+} # chgsplfa

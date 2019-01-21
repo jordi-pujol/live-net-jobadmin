@@ -1,0 +1,79 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# endwtr
+
+_endwtr_options="JA_WTR pr@
+JA_ENDJOBS"
+
+_endwtr() {
+	local hld sts wtr splf splf_attrs job pid usr
+
+	wtr="${JA_SPOOL}${JA_WTR}.wtr"
+
+	if ! _test_rw "${wtr}"; then
+		_usr_notify "Error: Not authorized to end writer '${JA_WTR}'."
+		return 1
+	fi
+
+	hld="$(_read_option "JA_HLD" "${JA_SPOOL}${JA_WTR}.wtr.attrs")" || :
+	if sts="$(_read_option "JA_WTR_STS" "${wtr}")"; then
+		_usr_notify "Warning: ${hld:+"Held "}writer '${JA_WTR}' is already stopped."
+		return 1
+	fi
+
+	_usr_notify "Stopping ${hld:+"Held "}writer '${JA_WTR}' "
+	_set_option "${wtr}" "JA_WTR_STS" "STP"
+	if [ "${JA_ENDJOBS}" = "Yes" ]; then
+		_usr_notify "Cancelling active print."
+		unset splf_attrs
+		while read splf_attrs; do
+			[ -s "${splf_attrs}" ] || continue
+			sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || continue
+			[ "${sts}" = "WTR" ] || continue
+			usr="$(stat -c "%U" "${splf_attrs}")"
+			if request="$(_read_option "JA_REQUEST" "${splf_attrs}")" && \
+			cancel -U "${usr}" "${request}"; then
+				_set_option "${splf_attrs}" "JA_WTR_ACTION" "SAV"
+				prt="$(_read_option "JA_PRT" "${splf_attrs}")" || continue
+				job="$(basename "$(dirname "${splf_attrs}")" ".job")"
+				pid="$(basename "${splf_attrs}" | \
+					sed -re '\|job-([[:digit:]]+)-.*| s||\1|')"
+				splf="$(basename "${splf_attrs}" | \
+					sed -re '\|job-[[:digit:]]+-(.*)\.splfa| s||\1|')"
+				_usr_notify "Cancelling print request '${request}' for \
+	spool file '${splf} ${job}.${usr}.${pid}'."
+			fi
+			unset splf_attrs
+		done < <(_find_job_files "*.splfa" "")
+		if _pipe_wtr_write "_jobadmin:"; then
+			_usr_notify "Done."
+		fi
+	fi
+} # endwtr

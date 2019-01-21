@@ -1,0 +1,62 @@
+#!/bin/bash
+
+###
+# Live never ending Tale
+#
+# live-net-initramfs script
+#
+# Copyright: (C) 2009-2016 Jordi Pujol <jordipujolp@gmail.com>
+# License:   GPLv2
+#
+# Live never ending Tale Project Homepage:
+# http://livenet.selfip.com
+###
+
+_set_cgroup_attr() {
+	echo "${2}" > "${1}" || \
+		echo "Error: Can't set '${1}' to '${2}'" >&2
+}
+
+# populate existing control groups
+_start() {
+	local cg_mntpoint slice_dir attr_val attr val
+	awk '$1 == "cgroup" && $2 !~ "/systemd$" {print $2}' < /proc/mounts | \
+	while read cg_mntpoint; do
+		find "${cg_mntpoint}" \
+		-mindepth 1 -type d -name '*.slice' 2> /dev/null | \
+		while read slice_dir; do
+			_set_cgroup_attr "${slice_dir}/cgroup.clone_children" "1"
+			for attr_val in $(systemctl cat "$(basename "${slice_dir}")" | \
+			sed -rne '\|^X-ControlGroupAttribute=(.*)$| s||\1|p'); do
+				echo "${attr_val}" | \
+				if IFS='[=:]' read attr val && \
+				[ -n "${val}" ]; then
+					if [ "${attr}" = "cpu.policy" ]; then
+						case "${val}" in
+							[0-5]) :;;
+							fifo) val="1";;
+							rr) val="2";;
+							batch) val="3";;
+							deadline) val="4";;
+							idle) val="5";;
+							# normal
+							*) val="0";;
+						esac
+					fi
+					_set_cgroup_attr "${slice_dir}/${attr}" "${val}"
+				fi
+			done
+		done
+	done
+}
+
+case "${1}" in
+	start)
+		_do_start
+		;;
+	*)
+		echo "Usage: ${0} start" >&2
+		exit 3
+		;;
+esac
+:

@@ -1,0 +1,242 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# work with user's jobs in a form
+
+. "${JA_LIB}libparms"
+
+_wrkusrjob_usage="Work with User Jobs
+
+wrkusrjob [options]
+
+- work with user's jobs in a form"
+
+_wrkusrjob_options="JA_USRL pr@
+JA_JOBQL pr@
+JA_JOB_STSL pr@
+JA_SBSTYPL pr@
+JA_SEQ"
+
+_wrkusrjob_chgview() {
+	case "${JA_SEQ}" in
+	2)
+		JA_DIALOG_FIELDS="Opt:3:2 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Job_Queue:15"
+		;;
+	*)
+		JA_SEQ=1
+		JA_DIALOG_FIELDS="Opt:3:2 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Execs:30"
+		;;
+	esac
+}
+
+_wrkusrjob_refresh() {
+	local auto="${1:-}"
+	# global all_jobs all_jobs_count M cmd_options
+
+	M=""; cmd_options=""
+	if [ -n "${auto}" ]; then
+		[ -n "${autorefresh}" ] || \
+			return 0
+		sleep 1
+	fi
+	all_jobs="$(_find_jobs "${JA_USRL}" "" "${JA_JOB_STSL}" \
+		"${JA_JOBQL}" "${JA_SBSTYPL}" | \
+		sort -t $'\t' -k 5n,5 -k 9nr,9 -k 1n,1)"
+	all_jobs_count="$(wc -l <<< "${all_jobs}")"
+}
+
+_wrkusrjob() {
+	local a line DIALOG job_pid job_pids
+	local lastkey M cmd_options all_jobs rc job_dir
+	local timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
+	local autorefresh="${JA_AUTOREFRESH:-}"
+
+	# list the jobs
+	JA_DIALOG_COMMANDS="$(awk '$2 ~ /\<JOB\>/ && $7 != "-" {
+printf $7" "}' "${JA_CONF_CMDS}")"
+	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F4 F5 F6 F9 F11 F12")"
+	_wrkusrjob_chgview
+	_wrkusrjob_refresh
+	rc=0
+	while :; do
+		_dialog_init
+		DIALOG="$(_dialog_header "${JA_MODULE_NAME}")"
+		line=1
+		i=0
+		unset timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
+		while IFS=$'\t' read timerls job usr sts stsord sbsd jobq \
+		jobq_sts pty attrs rest; do
+			[ -n "${timerls}" ] || continue
+			job_pids=""
+			job_pid=""
+			if [ -s "${attrs}" ]; then
+				job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+				job_pid="$(sed -re 's/^.* //' -e '/:/d' <<< "${job_pids}")"
+				if [ "${sts}" = "ACT" ] && \
+				! kill -0 "${job_pid}" 2> /dev/null; then
+					job_pid=""
+				fi
+			else
+				sts="ERR"
+			fi
+			# formatted listing of job data
+			i=$((${i}+1))
+			m="$(sed -ne "${i}p" <<< "${M}")"
+			case "${JA_SEQ}" in
+			2)
+				local hld="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")" || :
+				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+					"${job}.${usr}${job_pid:+".${job_pid}"}" \
+					"${sts}" \
+					"${pty}" \
+					"$(date --date=@${timerls} +'%Y-%m-%d %H:%M:%S')" \
+					"${jobq}$(test "${jobq_sts}" = "-" || printf '%s' "/${jobq_sts}")")"
+				;;
+			*)
+				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+					"${job}.${usr}${job_pid:+".${job_pid}"}" \
+					"${sts}" \
+					"${pty}" \
+					"$(date --date=@${timerls} +'%Y-%m-%d %H:%M:%S')" \
+					"${job_pids}")"
+				;;
+			esac
+			line=$((${line}+1))
+			unset timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
+		done <<< "${all_jobs}"
+		line=$((${line}+1))
+		DIALOG="${DIALOG}$(_dialog_options "${cmd_options}" "Parms-Cmd")"
+		# show dialog
+		rc=0
+		M="$(_dialog_exec "${JA_CONF_DLG}")" || rc="${?}"
+		cont="y"
+		lastkey="$(tail --lines=1 <<< "${M}")"
+		case "${rc}" in
+		0) # OK
+			_wrk_options
+			if [ -n "${M}" ]; then
+				i=1
+				err=""
+				M0="${M}"
+				while [ ${i} -le ${all_jobs_count} ]; do
+					m="$(_print_line "${i}" <<< "${M}")"
+					if [ -n "${m}" ]; then
+						e=""
+						JA_CMD_ARGS=()
+						JA_CMD_CMD=""
+						act_job="$(_print_line "${i}" <<< "${all_jobs}")"
+						if _cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS"; then
+							if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+								_options_reuse "${JA_CMD_CMD}" \
+								"JA_JOB=$(awk '{print $2}' <<< "${act_job}")" \
+								"JA_USR=$(awk '{print $3}' <<< "${act_job}")"
+							elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
+								_options_reuse "${JA_CMD_CMD}" \
+								"JA_JOBQ=$(awk '{print $7}' <<< "${act_job}" | cut -f 1 -d '/')"
+							elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
+								_options_reuse "${JA_CMD_CMD}" \
+								"JA_OUTQ=$(_read_option "JA_OUTQ" \
+								"$(awk '{print $NF}' <<< "${act_job}")")"
+							fi
+						else
+							e="Yes"
+						fi
+						if [ -z "${e}" ]; then
+							if [ -n "${JA_CMD_CMD}" ]; then
+								[ -z "${cmd_options}" ] || \
+									eval JA_CMD_ARGS+=(${cmd_options})
+								if [ -z "${JA_FKEY_CONFIRM}" -a \
+								"${JA_CMD_TERMINAL}" -lt 1 ]; then
+									_cmd_exec_background || e="No"
+								else
+									_cmd_exec || e="No"
+								fi
+							else
+								e="Yes"
+							fi
+						fi
+						if [ -z "${e}" ]; then
+							M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
+						else
+							[ "${e}" != "Yes" ] || \
+								_usr_notify "Invalid option '${m}'." "" "y"
+							err="Yes"
+						fi
+					fi
+					i=$((${i}+1))
+				done
+				if [ -n "${err}" ]; then
+					M="${M0}"
+				else
+					_${JA_MODULE}_refresh "y"
+				fi
+			elif [ -n "${cmd_options}" ] && \
+			eval JA_CMD_ARGS=(${cmd_options}); then
+				if _cmd_dsc "${JA_CMD_ARGS[@]}"; then
+					unset JA_CMD_ARGS[0]
+					if [ -z "${JA_FKEY_CONFIRM}" -a \
+					"${JA_CMD_TERMINAL}" -lt 1 ]; then
+						if _cmd_exec_background; then
+							_${JA_MODULE}_refresh "y"
+						fi
+					else
+						if _cmd_exec; then
+							_${JA_MODULE}_refresh "y"
+						fi
+					fi
+				else
+					_cmd_exec_shell
+					_${JA_MODULE}_refresh "y"
+				fi
+			else
+				_${JA_MODULE}_refresh "y"
+			fi
+			;;
+		2)
+			_help_cmds
+			;;
+		3)
+			_extra_button
+			;;
+		4) # NO Item-Help
+			_usr_notify "$(_usage 2>&1)" "" "y"
+			;;
+		1|255) # 1=Cancel 255=Esc
+			rc=0
+			break
+			;;
+		*)
+			_usr_notify "error ${rc} in dialog." "" "y"
+			break
+			;;
+		esac
+	done
+	_dialog_end
+	return "${rc}"
+} # wrkusrjob

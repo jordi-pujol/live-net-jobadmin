@@ -1,0 +1,1894 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+. /lib/lsb/init-functions
+
+set -o errexit -o nounset -o noglob -o pipefail
+
+NL=$'\n'
+TAB=$'\t'
+
+_ps_children() {
+	local ppid=${1:-${$}} excl="${2:-"0"}" pid
+	for pid in $(pgrep -P ${ppid} | grep -svwF "${excl}"); do
+		_ps_children ${pid} "${excl}"
+		echo ${pid}
+	done
+}
+
+_trim_unquote() {
+	sed -re ":a
+		s|^[[:blank:]]+(.*)$|\1|;t a
+		s|^(.*)[[:blank:]]+$|\1|;t a
+		s|^[']([^']*)[']$|\1|;t a
+		s|^[\"]([^\"]*)[\"]$|\1|;t a
+		s|^\((.*)\)$|\1|;t a"
+}
+
+_realpath() {
+	readlink -f "${1}" || readlink "${1}" || echo "${1}"
+}
+
+_flock_lckfile() {
+	local lckfile
+	[ -d "/run/lock/flock/" ] || mkdir -p -m 0777 "/run/lock/flock/"
+	lckfile="/run/lock/flock/$(_realpath "${1}" | sha256sum | cut -f1 -d ' ')"
+	if [ ! -f "${lckfile}" ]; then
+		touch "${lckfile}"
+		chmod a=rw "${lckfile}"
+	fi
+	echo "${lckfile}"
+	:
+}
+
+_expand_glob() {
+	local exp="${1}"
+	( set +o noglob
+	( ls -L1d ${exp} 2> /dev/null || \
+		test "${?}" -le "1" ) | \
+		tr -s '\n' '\000' | \
+		xargs -r0L1 readlink -f )
+}
+
+_sudo() {
+	local usr cmd
+	usr="${1:-"${JA_USR:-"$(id -un)"}"}"
+	shift
+	[ "${#}" -gt 0 ] || \
+		return 1
+	cmd=( $(test -x "$(which "${1}")" || printf '%s ' "sh" "-c") \
+		"${@}" )
+	if [ "$(id -un)" = "${usr}" ]; then
+		( "${cmd[@]}" ) &
+	else
+		( sudo -n ${DBUS_SESSION_BUS_ADDRESS:+"-E"} -u "${usr}" -- "${cmd[@]}" ) &
+	fi
+	wait -f "${!}"
+}
+
+# file or dir mode, computed with current umask
+# param: less restrictive mode
+_mode() {
+	local mask usr
+	mask="${1}"
+	usr="${2}"
+	printf "%#o\n" $((0${1} & ~0$(_sudo "${usr}" umask)))
+}
+
+# create a temporary file
+# param: file name
+# param: suffix, optional
+# param: program working directory, optional
+_mktemp() {
+	local name suffix path options perm usr
+	local d sudo
+	name="$(echo "${1}" | grep -se 'XXX' || echo "${1}_XXX")"
+	suffix="${2:+"--suffix .${2}"}"
+	path="${3:-"${JA_USR_DIR}"}"
+	options="${4}"
+	perm="${5:-"0666"}"
+	usr="${6}"
+	d="$(_sudo "${usr}" mktemp ${options} -p "${path}" \
+		${suffix} \
+		${name})" || \
+		return 1
+	chmod $(_mode "${perm}" "${usr}") "${d}"
+	printf '%s\n' "${d}"
+}
+
+# create a temporary directory
+# param: directory name
+# param: suffix. optional
+# param: program working directory, optional
+_mktempdir() {
+	local name suffix path usr
+	name="${1}"
+	suffix="${2}"
+	path="${3:-}"
+	usr="${4:-}"
+	_mktemp "${name}" "${suffix}" "${path}" "--directory" "0777" "${usr}"
+}
+
+_print_line() {
+	sed -nre "${1}{\|^[[:blank:]]+| s|||
+		\|[[:blank:]]+$| s|||
+		p}"
+}
+
+_test_rw() {
+	test -r "${1}" -a -w "${1}"
+}
+
+# writes all records in a single line separated by comma, or any string;
+# trims leading and trailing spaces and discards blank lines
+_comma_separated() {
+	sed -re ':a
+		N
+		$!ba
+		s/([^[:space:]])[[:space:]]+([^[:space:]])/\1'"${1:-","}"'\2/g
+		s/^[[:space:]]+|[[:space:]]+$//g'
+}
+
+_terminal_available() {
+	test -t 0 -a -t 1 -a -t 2
+}
+
+# _set_option
+# to use in little files
+# returns: true 
+#          or false when there is no permission to modify the file
+_set_option() {
+	local filename option value
+	local tmpfile fd0
+
+	filename="${1}"
+	option="${2}"
+	value="${3}"
+	( if ! flock --exclusive --timeout 1 ${fd0}; then
+		_usr_notify "Error: file '${filename}' is locked."
+		return 1
+	fi
+		[ -e "${filename}" ] || \
+			touch "${filename}" || \
+			return 1
+		[ -w "${filename}" ] || \
+			return 1
+		printf '%s\n' "g/^${option}=/d" 'g/^$/d' "w" | \
+			ed -s "${filename}" 2> /dev/null || \
+			[ -z "${JA_DEBUG}" ] || \
+			eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+		[ -z "${value}" ] || \
+			printf '%s\n' "${option}='${value}'" >> "${filename}"
+	) {fd0}< "$(_flock_lckfile "${filename}")" >&${bash_xtracefd} 2>&1
+}
+
+# returns: true or
+# 1 for null value or not defined
+# 2 file access error
+_read_option() {
+	local varname filename
+	local value
+	local fd0
+
+	varname="${1}"
+	filename="${2}"
+	[ -r "${filename}" ] || return 2
+	( if ! flock --shared --timeout 1 ${fd0}; then
+		_usr_notify "Error: file '${filename}' is locked."
+		return 3
+	fi
+	if value="$(sed -nre "\|^${varname}='(.*)'$| {s||\1|p;q}" "${filename}")"; then
+		printf '%s' "${value}"
+		test -n "${value}"
+	else
+		return 2
+	fi ) {fd0}< "$(_flock_lckfile "${filename}")"
+}
+
+# param: key to read
+# param: configuration file
+# returns: configuration line
+# returns: true or false
+_read_conf() {
+	local conf="${1}" filename="${2}"
+
+	[ -n "${conf}" ] && \
+		awk -v conf="${conf}" \
+		'$1 == conf {print; f=-1; exit}
+		END{exit f+1}' \
+		"${filename}"
+}
+
+_jobadmin_status() {
+	[ -s "${JA_PIDFILE}" ] && \
+		pidofproc -p "${JA_PIDFILE}" "${JA_DAEMON}" > /dev/null 2>&1
+}
+
+_filesize() {
+	stat -c %s "${1}" 2> /dev/null || \
+		printf '%s\n' "-1"
+}
+
+# returns: list of screens,
+# fields separated by spaces
+# pid jobname date time status
+_screen_list() {
+	local usr
+	usr="${1:-}"
+	_sudo "${usr}" screen -list | \
+		awk '$1 ~ "^[[:digit:]]+.[[:alnum:]_]+$" {
+		a=-1
+		gsub(/\./," ",$1)
+		gsub(/[()]/,"",$4)
+		print $1,$4 }
+		END{exit a+1}'
+}
+
+_system_users() {
+	( set +o noglob
+	( ls -L1d ${JA_SPOOL}*.usr || test "${?}" -le "1" ) | \
+		tr -s '\n' '\000' | \
+		xargs -r0 basename -s '.usr'
+	who --writable | awk '$2 != "-" {print $1}' ) 2> /dev/null | \
+	sort --unique
+}
+
+_usr_scdjobs_add() {
+	local scdjobs="${1:-"${JA_USR_DIR}"}${JA_USR_SCDJOBS}"
+	local job="${2:-"${JA_JOB}"}"
+	local fd1
+	
+	( if flock --exclusive --timeout 1 ${fd1}; then
+		grep -qsxe "${job}" "${scdjobs}" || \
+			printf '%s\n' "${job}" >> "${scdjobs}"
+	fi ) {fd1}< "$(_flock_lckfile "${scdjobs}")"
+}
+
+_usr_scdjobs_remove() {
+	local scdjobs="${1:-"${JA_USR_DIR}"}${JA_USR_SCDJOBS}"
+	local job="${2:-"${JA_JOB}"}"
+	local fd1
+
+	( if flock --exclusive --timeout 1 ${fd1}; then
+		[ ! -s "${scdjobs}" ] || \
+			printf '%s\n' "g/^${job}$/d" 'w' | \
+			ed -s "${scdjobs}" 2> /dev/null || :
+	fi ) {fd1}< "$(_flock_lckfile "${scdjobs}")"
+}
+
+# Help, first line contains tag "help" and last the keycode
+_help_cmds() {
+	cmd_options="$(head --lines=1 < <(tail --lines=2 <<< "${M}"))"
+	M="$(head --lines=-2 < <(tail --lines=+2 <<< "${M}") | \
+		tr '[:upper:]' '[:lower:]' | \
+		sed -re '\|^[[:blank:]]+| s|||
+		\|[[:blank:]]+$| s|||')"
+	_lastkey_detect "${lastkey}"
+	if [ -n "${JA_FKEY_AUTOREFRESH}" ]; then
+		autorefresh="$(test -n "${autorefresh}" || echo "y")"
+	elif [ -n "${JA_FKEY_DSPMSG}" ]; then
+		if _cmd_dsc "dspmsg"; then
+			JA_CMD_ARGS=("--msgq" "$(basename "${JA_DIALOG_TAILBOXMSG}" ".msgq")")
+			_cmd_exec || :
+		fi
+	else
+		_usr_notify "$(_usage 2>&1)" "" "y"
+		_usr_notify "$(awk '$5 != "-" && $6 != "-" {
+			print $2" "$6"="$1}' "${JA_CONF_CMDS}" | sort | \
+			awk 'BEGIN{a = ""} {
+			printf $2", "
+			if (a != "" && $1 != a) {
+			a = "$1"
+			printf "\n"}}
+			END{printf "\n"}')" "" "y"
+	fi
+}
+
+# Extra-button/Refresh
+_extra_button() {
+	_wrk_options
+	if [ -n "${JA_FKEY_RETRIEVE}" ]; then
+		if [ -z "${M//[[:blank:]$'\n']/}" ]; then
+			[ -n "${cmd_options}" ] || \
+				cmd_index=0
+			cmd_options="$(_cmd_retrieve)"
+			cmd_index="$((${cmd_index}+1))"
+		else
+			_usr_notify "Can't retrieve commands while there are pending options." \
+				"" "y"
+		fi
+	elif [ -n "${M//[[:blank:]$'\n']/}${cmd_options//[[:blank:]$'\n']/}" ]; then
+		_usr_notify "Can't refresh while there are pending options." \
+			"" "y"
+	else
+		if [ -n "${JA_FKEY_CHGVIEW}" ]; then
+			JA_SEQ=$((${JA_SEQ}+1))
+			_${JA_MODULE}_chgview
+			_${JA_MODULE}_refresh
+		elif [ -n "${JA_FKEY_PARMS}" ]; then
+			_jobadmin_parms_vars
+		else
+			_${JA_MODULE}_refresh
+		fi
+	fi
+}
+
+_usr_notify() {
+	local usrs usr msg msgq usr_dir daemon
+
+	msg="[$(date --rfc-3339=seconds | \
+	cut -f 1 -d '+')${JA_CMD_PID:+" ${JA_CMD_PID}"}] $(tr -s '@' '\n' <<< "${1}")"
+	usrs="${2:-"${JA_USR:-} ${JA_USRACT:-}"}"
+	[ -n "${usrs}" ] || \
+		return 0
+	daemon="${3:-}"
+	[ -n "${daemon}" ] || \
+		echo "${msg}" >&2
+
+	for usr in $(sort --unique <<< "${usrs//[[:blank:]]/$'\n'}"); do
+		usr_dir="$(_usr_dir "${usr}")" || continue
+		[ -d "${usr_dir}" ] || continue
+		msgq="${usr_dir}user.msgq"
+		[ -f "${msgq}" ] || \
+			_sudo "${usr}" touch "${msgq}" || :
+		if [ -w "${msgq}" ]; then
+			printf '%s\n' "${msg}" >> "${msgq}"
+		else
+			_pipe_write "_usr_notify:${usr}:$(
+			_comma_separated "@" <<< "${msg}")"
+		fi
+	done
+	:
+}
+
+# prints the parent pid of the process
+# returns true or false
+_pid_parent() {
+	local pid ppid
+	pid="${1:-"${$}"}"
+	ppid="$(ps --no-heading -o ppid --pid "${pid}" | tr -d '[:blank:]')"
+	test -n "${ppid}" && echo "${ppid}"
+}
+
+_commands_exec() {
+	local job_pid="${1}"
+	local pid pc pm c cmds pcpu pmem
+
+	pid="$(ps --no-heading -o pid -C "job-${job_pid}.cmd" | \
+		tr -d ' ')"
+	[ -n "${pid}" ] || \
+		return 1
+	cmds=""
+	pcpu=0
+	pmem=0
+	unset pc pm c
+	while read -r pc pm c; do
+		[ -n "${pc}" ] || \
+			continue
+		grep -qs -m 1 -xe "${c}" <<< "${cmds}" || \
+			cmds="${cmds:+"${cmds}${NL}"}${c}"
+		pc="$(sed -re '/[.]([[:digit:]]$)/ s//\1/
+			/[.]$/ s//0/
+			/^[0]+/ s///' <<< "${pc}")"
+		pm="$(sed -re '/[.]([[:digit:]]$)/ s//\1/
+			/[.]$/ s//0/
+			/^[0]+/ s///' <<< "${pm}")"
+		[ -z "${pc}" ] || \
+			pcpu=$((${pcpu}+${pc}))
+		[ -z "${pm}" ] || \
+			pmem=$((${pmem}+${pm}))
+		unset pc pm c
+	done < <(ps --no-heading -o pcpu,pmem,comm --pid $(_ps_children "${pid}"))
+
+	printf '%s ' "${pcpu}" "${pmem}" \
+		"$(_comma_separated <<< "${cmds}")"
+	printf '\n'
+	:
+}
+
+_pipe_pull() {
+	local pipe="${1}" msg=""
+
+_pipe_pop() {
+	local fd1
+	( if ! flock --timeout 1 --exclusive ${fd1}; then
+		echo "Error: _pipe_pop can't get a lock." >&2
+		return 1
+	fi
+		[ ! -s "${pipe}" ] || \
+			printf '%s\n' "1p" "1d" "w" | \
+				ed -s "${pipe}"
+			# EXINIT="$(printf '%s\n' "1w! /dev/stdout" "1d" "wq")" busybox vi "${pipe}"
+			# vim -es '+1,1%print' '+:1d' '+:wq!' # vim or vim-tiny
+	) {fd1}< "${pipe}"
+	:
+}
+
+	while [ -z "${msg}" ]; do
+		if [ ! -s "${pipe}" ]; then
+			inotifywait -e modify "${pipe}" > /dev/null 2>&1 &
+			wait -f "${!}" || \
+				return 1
+		fi
+		msg="$(_pipe_pop)" || \
+			return 1
+	done
+	printf '%s\n' "${msg}"
+	:
+}
+
+# Adds multiple elements at once
+# param:
+#  pipe_name elem_1 ... elem_N
+# returns:
+#  true on succes, false on error
+_pipe_push() {
+	local pipe="${1}"
+	local fd1
+
+	if [ ! -e "${pipe}" ]; then
+		_usr_notify "Error: Daemon is not running, \
+message '${msg}' has not been sent to pipe '${pipe}'."
+		return 1
+	fi
+	shift
+	( if ! flock --timeout 10 --exclusive ${fd1}; then
+		echo "Error: _pipe_push can't get a lock." >&2
+		return 1
+	fi
+		printf '%s\n' "${@}" >> "${pipe}"
+	) {fd1}< "${pipe}"
+}
+
+_pipe_write() {
+	_pipe_push "${JA_PIPE}" "${@}"
+}
+
+_pipe_wtr_write() {
+	_pipe_push "${JA_PIPE_WTR}" "${@}"
+}
+
+_pipe_daemon_write() {
+	_pipe_push "${JA_PIPE_DAEMON}" "${@}"
+}
+
+_job_canonize_name() {
+	JA_JOB="$(sed -r -e 's|[^[:alnum:]_]|_|g' <<< "${JA_JOB}")"
+}
+
+_find_jobs_files() {
+	local usrs="${1}" name="${2}" days_old="${3}"
+	local files
+
+	files="$(for usr in ${usrs//,/ }; do
+			_expand_glob "${JA_SPOOL}${usr}.usr/*.job" || :
+		done)"
+	[ -z "${files}" ] || \
+		find ${files} \
+		-mindepth 1 -maxdepth 1 -type f \
+		-name "${name}" \
+		$(test "${days_old}" -eq 0 || \
+		printf '%s ' "-daystart" "-atime" "+${days_old}") 
+}
+
+_find_splfs() {
+	local usrl wtrsl splf_stsl outqsl splf_job splf_job_pid
+	local usr splf_attrs splf_sts job job_usr outq outq_sts wtr datesplf outpty
+	local found wtr_outqs
+
+	usrl="${1:-"$(cat "${JA_TMP}users.lst")"}"
+	! grep -qs -iwe "all" <<< "${usrl}" || \
+		usrl="$(cat "${JA_TMP}users.lst")"
+	wtrsl="${2}"
+	! grep -qs -iwe "all" <<< "${wtrsl}" || \
+		wtrsl="$(cat "${JA_TMP}rwtrs.lst")"
+	splf_stsl="${3}"
+	! grep -qs -iwe "ALL" <<< "${splf_stsl}" || \
+		splf_stsl="OPN,RDY,WTR,SAV,HLD"
+	outqsl="${4}"
+	! grep -qs -iwe "all" <<< "${outqsl}" || \
+		outqsl="$(cat "${JA_TMP}outqs.lst")"
+	if [ -z "${outqsl}" ] && \
+	! grep -qs -we '-' <<< "${wtrsl}"; then
+		for wtr in ${wtrsl//,/ }; do
+			if ! _read_option "JA_WTR_STS" "${JA_SPOOL}${wtr}.wtr" > /dev/null; then
+				for outq in $(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr}.wtr"); do
+					if ! grep -qs -we "${outq}" <<< "${outqsl}"; then
+						outqsl="${outqsl}${outqsl:+","}${outq}"
+					fi
+				done
+			fi
+		done
+	fi
+	splf_job="${5:-"*"}"
+	splf_job_pid="${6:-"*"}"
+
+	unset splf_attrs
+	while read -r splf_attrs; do
+		[ -s "${splf_attrs}" ] || continue
+		splf_sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || \
+			splf_sts="RDY"
+		[ -z "${splf_stsl}" ] || \
+			grep -qs -we "${splf_sts}" <<< "${splf_stsl}" || \
+			continue
+		[ "${splf_sts}" != "RDY" ] || \
+			! _read_option "JA_HLD" "${splf_attrs}" > /dev/null || \
+			splf_sts="RDY/HLD"
+		outq="$(_read_option "JA_OUTQ" "${splf_attrs}")" || \
+			continue
+		[ -z "${outqsl}" ] || \
+			grep -qs -we "${outq}" <<< "${outqsl}" || \
+			continue
+		outpty="$(_read_option "JA_OUTPTY" "${splf_attrs}")" || outpty="3"
+		found=""
+		for wtr in $(cat "${JA_TMP}rwtrs.lst" | tr -s "," " "); do
+			if ! _read_option "JA_WTR_STS" "${JA_SPOOL}${wtr}.wtr" > /dev/null && \
+			wtr_outqs=$(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr}.wtr") && \
+			grep -qs -we "${outq}" <<< "${wtr_outqs}"; then
+				found="Yes"
+				break
+			fi
+		done
+		[ -n "${found}" ] || \
+			wtr="-"
+		[ -z "${wtrsl}" ] || \
+			grep -qs -we "${wtr}" <<< "${wtrsl}" || \
+			continue
+		outq_sts="$(_read_option "JA_HLD" "${JA_SPOOL}${outq}.outq.attrs")" || \
+			outq_sts="-"
+		splf_sts_order=0
+		datesplf="$(_read_option "JA_DATESBM" "${splf_attrs}")" || datesplf=0
+		case "${splf_sts}" in
+		WTR)
+			datesplf="$(_read_option "JA_DATESTR" "${splf_attrs}")" || datesplf=0
+			splf_sts_order=1
+			outpty="-"
+			;;
+		RDY)
+			datesplf="$(_read_option "JA_DATERLS" "${splf_attrs}")" || datesplf=0
+			splf_sts_order=2
+			[ "${outq_sts}" = "-" ] || \
+				splf_sts_order=3
+			;;
+		OPN)
+			splf_sts_order=4
+			[ "${outq_sts}" = "-" ] || \
+				splf_sts_order=5
+			;;
+		RDY/HLD)
+			splf_sts_order=6
+			[ "${outq_sts}" = "-" ] || \
+				splf_sts_order=7
+			;;
+		SAV)
+			splf_sts_order=8
+			[ "${outq_sts}" = "-" ] || \
+				splf_sts_order=9
+			;;
+		esac
+		job="$(basename "$(dirname "${splf_attrs}")" ".job")"
+		job_usr="$(stat -c "%U" "${splf_attrs}")"
+		job_pid="$(basename "${splf_attrs}" | \
+			sed -re '\|job-([[:digit:]]+)-.*| s||\1|')"
+		splf="$(basename "${splf_attrs}" | \
+			sed -re '\|job-[[:digit:]]+-(.*)\.splfa| s||\1|')"
+		printf '%s\t' "${wtr}" "${outq}" \
+			"${splf_sts_order}" "${outpty}" "${datesplf}" \
+			"${splf}" "${job}" "${job_usr}" "${job_pid}" \
+			"${splf_sts}" "${outq_sts}" "${splf_attrs}"
+		printf '\n'
+		unset splf_attrs
+	done < <(for usr in ${usrl//,/ }; do
+	_expand_glob "${JA_SPOOL}${usr}.usr/${splf_job}.job/job-${splf_job_pid}-*.splfa" || :
+	done 2> "/dev/null")
+	:
+}
+
+_sbsds_selected() {
+	local sbsdl="${1:-"${JA_SBSDL}"}" sbstypl="${2:-"${JA_SBSTYPL}"}"
+	local jobql="${3:-"${JA_JOBQL}"}"
+	local sbsd
+
+	if [ "${sbsdl}" = "all" ] && [ "${jobql}" != "all" ]; then
+		sbsdl="$(awk -v jobql="${jobql}" \
+			'BEGIN{split(jobql,a,",")
+			for (v in a) jobqs[a[v]]}
+			$1 in jobqs {sbsds ? sbsds=sbsds","$2 : sbsds=$2}
+			END{print sbsds}' \
+			"${JA_CONF_JOBQS}")"
+	fi
+
+	while read -r sbsd sbs_typ; do
+		[ "${sbsdl}" = "all" ] || \
+			grep -qs -we "${sbsd}" <<< "${sbsdl}" || \
+			continue
+		[ "${sbstypl}" = "ALL" ] || \
+			case "${sbs_typ}" in
+			0) grep -qs -iwe 'INT' <<< "${sbstypl}" || \
+				continue
+				;;
+			1) grep -qs -iwe 'CTL' <<< "${sbstypl}" || \
+				continue
+				;;
+			2) grep -qs -iwe 'BCH' <<< "${sbstypl}" || \
+				continue
+				;;
+			*) echo "Error in subsystem description" "${sbsd}" "configuration:" \
+				"Invalid SBSTYP" "${sbs_typ}" >&2
+				continue ;;
+			esac
+		printf '%s ' "${sbsd}"
+	done < <(awk '{print $1 OFS $4}' "${JA_CONF_SBSDS}" | sort)
+	:
+}
+
+_find_jobs() {
+	local usrl sbsdl job_stsl jobqsl sbs_type
+	local usr job_sts job_hld job_usr jobq jobq_sts rc sbsd timejob attrs pty
+	usrl="${1:-"$(cat "${JA_TMP}users.lst")"}"
+	! grep -qs -iwe "all" <<< "${usrl}" || \
+		usrl="$(cat "${JA_TMP}users.lst")"
+	sbsdl="${2}"
+	! grep -qs -iwe "all" <<< "${sbsdl}" || \
+		sbsdl=""
+	job_stsl="${3}"
+	! grep -qs -iwe "ALL" <<< "${job_stsl}" || \
+		job_stsl=""
+	jobqsl="${4}"
+	! grep -qs -iwe "all" <<< "${jobqsl}" || \
+		jobqsl=""
+	sbs_type="${5}"
+	! grep -qs -iwe "all" <<< "${sbs_type}" || \
+		sbs_type=""
+
+	unset attrs
+	while read -r attrs; do
+		[ -s "${attrs}" ] || continue
+		job_sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
+			job_sts="JOBQ"
+		[ -z "${job_stsl}" ] || \
+			grep -qs -we "$(cut -f 1 -d '/' <<< "${job_sts}")" <<< "${job_stsl}" || \
+			continue
+		pty="$(_read_option "JA_PTY" "${attrs}")" || \
+			pty="3"
+		jobq="$(_read_option "JA_JOBQ" "${attrs}")" || \
+			jobq="-"
+		[ -z "${jobqsl}" ] || \
+			grep -qs -we "${jobq}" <<< "${jobqsl}" || \
+			continue
+		sbsd="$(awk '$1 == "'"${jobq}"'" {print $2; rc = -1; exit}
+			END{exit rc+1}' "${JA_CONF_JOBQS}")" || \
+				continue
+		[ -z "${sbsdl}" ] || \
+			grep -qs -we "${sbsd}" <<< "${sbsdl}" || \
+				continue
+		if [ -n "${sbs_type}" ]; then
+			case "$(awk -v sbsd="${sbsd}" '$1 == sbsd {print $4; exit}' \
+				"${JA_CONF_SBSDS}")" in
+			0) echo "${sbs_type}" | grep -qsiwe 'int' || \
+				continue
+				;;
+			1) echo "${sbs_type}" | grep -qsiwe 'ctl' || \
+				continue
+				;;
+			2) echo "${sbs_type}" | grep -qsiwe 'bch' || \
+				continue
+				;;
+			*) continue
+				;;
+			esac
+		fi
+		job_hld="$(_read_option "JA_HLD" "${attrs}")" || :
+		jobq_sts="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")" || \
+			jobq_sts="-"
+		job_sts_order=0
+		case "${job_sts}" in
+		JOBQ)
+			timejob="$(_read_option "JA_DATERLS" "${attrs}")" || timejob=0
+			job_sts_order=2
+			[ "${jobq_sts}" = "-" -a -z "${job_hld}" ] || \
+				job_sts_order=3
+			if [ -n "${job_hld}" ]; then
+				job_sts="${job_sts}/${job_hld}"
+				timejob="$(_read_option "JA_DATESBM" "${attrs}")" || timejob=0
+			fi
+			;;
+		ACT|END)
+			job_pids="$(_read_option "JA_PIDS" "${attrs}")" && \
+			job_pid="$(awk '{print $NF}' <<< "${job_pids}" | \
+				cut -f 1 -d ":")" && \
+			timejob="$(_read_option "JA_DATESTR" \
+				"$(dirname "${attrs}")/job-${job_pid}.attrs")" || \
+				timejob=0
+			job_sts_order=1
+			pty="-"
+			if [ -n "${job_hld}" ]; then
+				job_sts="${job_sts}/${job_hld}"
+				timejob="$(_read_option "JA_DATESBM" "${attrs}")" || timejob=0
+			fi
+			;;
+		OUTQ)
+			job_pids="$(_read_option "JA_PIDS" "${attrs}")" && \
+			job_pid="$(awk '{print $NF}' <<< "${job_pids}" | \
+				cut -f 1 -d ":")" && \
+			timejob="$(_read_option "JA_DATEEND" \
+				"$(dirname "${attrs}")/job-${job_pid}.attrs")" || \
+				timejob=0
+			job_sts_order=6
+			[ "${jobq_sts}" = "-" ] || \
+				job_sts_order=7
+			end_sts="${job_pids##*:}"
+			job_sts="OUTQ/${end_sts::3}"
+			;;
+		esac
+		job="$(basename "$(dirname "${attrs}")" ".job")"
+		job_usr="$(stat -c "%U" "${attrs}")"
+		printf '%s\t' "${timejob}" "${job}" \
+			"${job_usr}" "${job_sts}" "${job_sts_order}" "${sbsd}" "${jobq}" \
+			"${jobq_sts}" "${pty}" "${attrs}"
+		printf '\n'
+		unset attrs
+	done < <( if [ "${job_stsl}" = "ACT" ]; then
+			for usr in ${usrl//,/ }; do
+				( _expand_glob "${JA_SPOOL}${usr}.usr/*.job/job.pid" | \
+					sed -re '\|pid$| s||attrs|' ) || :
+			done
+		else
+			for usr in ${usrl//,/ }; do
+				_expand_glob "${JA_SPOOL}${usr}.usr/*.job/job.attrs" || :
+			done
+		fi 2> "/dev/null")
+}
+
+_usr_valid() {
+	local usr
+	local usr_uid
+	usr="${1}"
+	[ -n "${usr}" ] && \
+	usr_uid="$(id -u "${usr}" 2> /dev/null)" && \
+	test ${usr_uid} -eq 0 -o ${usr_uid} -gt 999
+}
+
+_usr_homedir() {
+	local usr
+	local ent
+	usr="${1:-"${JA_USR:-}"}"
+
+	_usr_valid "${usr}" || return 1
+
+	ent="$(getent passwd "${usr}")" || return 1
+	awk 'BEGIN{FS=":"}
+	{print $6; rc=-1; exit}
+	END{exit rc+1}' <<< "${ent}" || \
+		return 1
+}
+
+_usr_dir() {
+	local usr
+	local home usr_dir
+	usr="${1:-"${JA_USR:-}"}"
+
+	if [ -L "${JA_SPOOL}${usr}.usr" ]; then
+		_usr_valid "${usr}" || \
+			return 1
+		usr_dir="$(_realpath "${JA_SPOOL}${usr}.usr")"
+	else
+		home="$(_usr_homedir "${usr}")" || \
+			return 1
+		if [ -s "${home}/.jobadminrc" ] && \
+		usr_dir="$(_read_option "JA_USR_DIR" "${home}/.jobadminrc")"; then
+			usr_dir="$(cd "${home}" && _realpath "${usr_dir}")"
+		else
+			usr_dir="${home}/.jobadmin"
+		fi
+	fi
+
+	sed -re 's|([^/])$|\1/|' <<< "${usr_dir}"
+	:
+}
+
+_job_exist() {
+	local job usr
+	local job_dir usr_dir
+	job="${1:-"${JA_JOB}"}"
+	usr="${2:-"${JA_USR}"}"
+
+	if [ -z "${job}" ] || [ -z "${usr}" ] || \
+	! usr_dir="${JA_USR_DIR:-"$(_usr_dir "${usr}")"}" || \
+	! job_dir="$(_realpath "${usr_dir}${job}.job")/" || \
+	[ ! -d "${job_dir}" ] || \
+	[ "$(stat -c "%U" "${job_dir}")" != "${usr}" ]; then
+		_usr_notify "Error: job '${job}.${usr}' does not exist."
+		return 1
+	fi
+	printf '%s\n' "${job_dir}"
+	:
+}
+
+_job_exist_exec() {
+	local job usr job_pid
+	local job_pids job_dir usr_dir
+	job="${1:-"${JA_JOB}"}"
+	usr="${2:-"${JA_USR}"}"
+	job_pid="${3:-"${JA_PID}"}"
+
+	[ -n "${job}" ] || \
+		return 1
+	usr_dir="$(_usr_dir "${usr}")" || \
+		return 1
+	job_dir="${usr_dir}${job}.job/"
+	[ -d "${job_dir}" ] || \
+		return 1
+	if ! job_pids="$(_read_option "JA_PIDS" "${job_dir}job.attrs")"; then
+		_usr_notify "Warning: No executions exist for '${job}.${usr}'."
+		return 1
+	fi
+	if [ -n "${job_pid}" ]; then
+		if ! grep -qs -we "${job_pid}" <<< "${job_pids}"; then
+			_usr_notify "Error: Invalid execution '${job}.${usr}.${job_pid}'."
+			return 1
+		fi
+	else # choose the last execution
+		job_pid="$(awk '{print $NF}' <<< "${job_pids}" | cut -f 1 -d ":")"
+	fi
+	printf '%s\n' "${job_pid}"
+	:
+}
+
+_wrk_options() {
+	cmd_options="$(head --lines=1 < <(tail --lines=2 <<< "${M}"))"
+	M="$(head --lines=-2 <<< "${M}" | \
+		tr '[:upper:]' '[:lower:]' | \
+		sed -re '\|^[[:blank:]]+| s|||
+		\|[[:blank:]]+$| s|||')"
+	_lastkey_detect "${lastkey}"
+}
+
+_getopt_err_print() {
+	local result="${1}"
+	local getopt_err="${2}"
+	local getopt_err_name="${3}"
+	local err varname optname value
+
+	for err in $(sed -nre '\|'"${getopt_err}"'=(.*).*| s||\1|p' <<< "${result}" | \
+	sed -re '\|[;[:blank:]]+$| s|||' | _trim_unquote); do
+		varname="$(cut -f 1 -d '=' <<< "${err}")"
+		optname="$(awk '$1 == "'${varname}'" {
+			for (v=6; v<=NF;v++) printf $v " "
+			exit}' "${JA_CONF_PARMS}")"
+		value="$(cut -f 2- -s -d '=' <<< "${err}")"
+		if [ -n "${value}" ]; then
+			printf '%s: %s= %s\n' "${getopt_err_name}" \
+				"${optname:-"${varname} "}" "${value}"
+		else
+			printf '%s: %s\n' "${getopt_err_name}" \
+				"${optname:-"${varname} "}"
+		fi
+	done
+}
+
+_getopt_errors() {
+	local result="${1}"
+	local array remainder r
+
+	[ -n "${result}" ] || return 0
+	_getopt_err_print "${result}" "LNET_GETOPT_ERR_VALUE" "Invalid value"
+	_getopt_err_print "${result}" "LNET_GETOPT_ERR_REQUIRED" "Required value"
+	_getopt_err_print "${result}" "LNET_GETOPT_ERR_DUPLICATE" "Duplicate parameter"
+	_getopt_err_print "${result}" "LNET_GETOPT_ERR_CHOICE" "Invalid choice"
+	grep -qs -e '^LNET_GETOPT_ERR_ALLVARS=' <<< "${result}" || \
+		return 0
+	remainder="$(sed -rne "/^set -- (.*);/ s//\1/p" <<< "${result}")"
+	if [ -n "${remainder}" ]; then
+		printf "Remainder options: "
+		eval array=( ${remainder} )
+		for r in "${array[@]}"; do
+			printf '%s ' "${r}"
+		done
+		printf '\n'
+	fi
+	:
+}
+
+_cmd_dsc() {
+	local cmd="${1:-}"
+	local cmd_dsc
+	[ -n "${cmd}" ] || \
+		return 1
+	JA_CMD_CMD=""; JA_CMD_OBJ=""; JA_CMD_TERMINAL=""; JA_CMD_USROPT=""; JA_CMD_ABV=""; JA_CMD_ACC=""
+	JA_CMD_NCURSES=""; JA_CMD_NAME=""
+	[ -n "${cmd}" ] && \
+		[ "${cmd}" != "-" ] || \
+		return 1
+	cmd_dsc="$(awk -v cmd="${cmd}" '$1 == cmd {print; rc=-1; exit}
+		END{exit rc+1}' \
+		"${JA_CONF_CMDS}")" || \
+		return 1
+
+	read JA_CMD_CMD JA_CMD_OBJ JA_CMD_TERMINAL JA_CMD_USROPT \
+		JA_CMD_ABV JA_CMD_ACC JA_CMD_NCURSES JA_CMD_NAME <<< "${cmd_dsc}"
+	[ -n "${JA_CMD_NCURSES:-}" ] || \
+		JA_CMD_NCURSES="${JA_CMD_CMD}"
+	[ -z "${JA_FKEY_ASSIST:-}" ] || \
+		JA_CMD_TERMINAL="2"
+	:
+}
+
+# param: abv, type string
+#        abbreviatted command
+# param: object, type string
+#        object type
+# prints: field values for this abv
+# returns: true or false
+_cmd_abv_dsc() {
+	local abv="${1}"
+	local objs="${2}"
+	local obj abv_dsc
+	JA_CMD_CMD=""; JA_CMD_OBJ=""; JA_CMD_TERMINAL=""; JA_CMD_USROPT=""; JA_CMD_ABV=""
+	JA_CMD_ACC=""; JA_CMD_NCURSES=""; JA_CMD_NAME=""
+	[ -n "${abv}" ] || \
+		return 1
+	for obj in ${objs//,/ }; do
+		if ! abv_dsc="$(awk '$2 ~ /\<'${obj}'\>/ \
+		&& ($5 == "'${abv}'" || $6 == "'${abv}'") {print; exit 1}' \
+		"${JA_CONF_CMDS}")"; then
+			read JA_CMD_CMD JA_CMD_OBJ JA_CMD_TERMINAL JA_CMD_USROPT \
+				JA_CMD_ABV JA_CMD_ACC JA_CMD_NCURSES JA_CMD_NAME <<< "${abv_dsc}"
+			[ -z "${JA_FKEY_ASSIST}" ] || \
+				JA_CMD_TERMINAL="2"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# returns: true or false
+_jobd_dsc() {
+	local jobd="${1}"
+	local jobd_dsc dummy
+
+	JA_JOBD_JOBQ=""; JA_JOBD_OUTQ=""; JA_JOBD_SPLFHLD=""; JA_JOBD_OUTPTY=""
+	JA_JOBD_LJOIN=""; JA_JOBD_HLD=""; JA_JOBD_PTY=""; JA_JOBD_DBG=""
+	JA_JOBD_INHIBIT=""; JA_JOBD_ONERROR=""
+	[ -n "${jobd}" ] || \
+		return 1
+	jobd_dsc="$(_read_conf "${jobd}" "${JA_CONF_JOBDS}")" || \
+		return 1
+	read dummy JA_JOBD_JOBQ JA_JOBD_OUTQ JA_JOBD_SPLFHLD JA_JOBD_OUTPTY \
+		JA_JOBD_LJOIN JA_JOBD_HLD JA_JOBD_PTY JA_JOBD_DBG JA_JOBD_INHIBIT \
+		JA_JOBD_ONERROR \
+			<<< "${jobd_dsc}"
+	return 0
+}
+
+# returns: true or false
+_jobq_dsc() {
+	local jobq="${1}"
+	local jobq_dsc dummy rest
+
+	JA_JOBQ_SBSD=""; JA_JOBQ_MAXJOBS=""; JA_JOBQ_PERMS=""; JA_JOBQ_ONERROR=""
+	[ -n "${jobq}" ] || \
+		return 1
+	jobq_dsc="$(_read_conf "${jobq}" "${JA_CONF_JOBQS}")" || \
+		return 1
+	read dummy JA_JOBQ_SBSD JA_JOBQ_MAXJOBS JA_JOBQ_PERMS JA_JOBQ_ONERROR rest \
+		<<< "${jobq_dsc}"
+	return 0
+}
+
+# returns: true or false
+_outq_dsc() {
+	local outq="${1}"
+	local outq_dsc dummy rest
+
+	JA_OUTQ_WTR=""; JA_OUTQ_STWTR=""
+	[ -n "${outq}" ] || \
+		return 1
+	outq_dsc="$(_read_conf "${outq}" "${JA_CONF_OUTQS}")" || \
+		return 1
+	read dummy JA_OUTQ_WTR JA_OUTQ_STWTR rest <<< "${outq_dsc}"
+	return 0
+}
+
+_usr_id() {
+	local usr="${1}"
+
+	_usr_valid "${usr}" || \
+		return 1
+
+	JA_USR_USR="$(id -un "${usr}")"
+	JA_USR_UID="$(id -u "${usr}")"
+	JA_USR_GROUP="$(id -gn "${usr}")"
+	JA_USR_GROUPS="$(id -Gn "${usr}")"
+}
+
+# sets the definition in variable values
+# returns: true or false
+_usr_dsc() {
+	local usr="${1}"
+	local group usr_dsc dummy rest
+
+	JA_USR_JOBD=""
+
+	_usr_id "${usr}" || \
+		return 1
+
+	usr_dsc="$(_read_conf "${JA_USR_USR}" "${JA_CONF_USRS}")" || \
+	usr_dsc="$(_read_conf "@${JA_USR_GROUP}" "${JA_CONF_USRS}")" || \
+		for group in ${JA_USR_GROUPS}; do
+			! usr_dsc="$(_read_conf "@${group}" "${JA_CONF_USRS}")" || \
+				break
+		done
+	if [ -z "${usr_dsc}" ] && \
+	! usr_dsc="$(_read_conf "*" "${JA_CONF_USRS}")"; then
+		_usr_notify "invalid users.conf file or usr '${usr}' not defined."
+		exit 1
+	fi
+	read dummy JA_USR_JOBD rest <<< "${usr_dsc}"
+	:
+}
+
+_cmdline_getopt() {
+	local k n
+
+	k=""
+	for n in "${LNET_GETOPT_CMD[@]:-}";do
+		! printf '%s\n' "${@}" | grep -qs -we "${n}" || \
+			continue
+
+		[ -z "${k}" ] && \
+			k=0 || \
+			printf ' '
+
+		_print_param "${n}"
+	done
+}
+
+_job_add() {
+	_job_canonize_name
+	[ -d "${JA_USR_DIR}" ] || \
+		_sudo "" mkdir -p "${JA_USR_DIR}"
+	JA_JOB_DIR="${JA_USR_DIR}${JA_JOB}.job/"
+	if [ -d "${JA_JOB_DIR}" ]; then # job name already exist, create another name
+		local job="${JA_JOB}"
+		JA_JOB_DIR="$(_mktempdir "${JA_JOB}" "job")/"
+		JA_JOB="$(basename "${JA_JOB_DIR}" '.job')"
+		_usr_notify "Warning: Already exists a job with name '${job}.${JA_USR}', new name '${JA_JOB}'."
+	fi
+	( if ! flock --exclusive --nonblock ${fd1}; then
+		_usr_notify "Error: job '${JA_JOB_DIR}' is locked."
+		return 1
+	fi
+	hld="$(test "${JA_HLD}" = "Yes" && echo "HLD" || :)"
+	if _sudo "" mkdir -p "${JA_JOB_DIR}" && \
+	_sudo "" touch "${JA_JOB_DIR}job.attrs" \
+	"${JA_JOB_DIR}job.cmd"; then
+		cat <<EOF > "${JA_JOB_DIR}job.attrs"
+JA_JOBQ='${JA_JOBQ}'
+JA_OUTQ='${JA_OUTQ}'
+$(test -z "${JA_DBG}" || \
+printf '%s\n' "JA_DBG='${JA_DBG}'")
+$(test -z "${JA_OUTHLD}" || \
+printf '%s\n' "JA_OUTHLD='${JA_OUTHLD}'")
+$(test -z "${JA_SPLFSAV}" || \
+printf '%s\n' "JA_SPLFSAV='${JA_SPLFSAV}'")
+JA_OUTPTY='${JA_OUTPTY}'
+$(test -z "${JA_LJOIN}" || \
+printf '%s\n' "JA_LJOIN='${JA_LJOIN}'")
+JA_PWD='${JA_PWD}'
+$(test -z "${JA_SAVED}" || \
+printf '%s\n' "JA_SAVED='${JA_SAVED}'")
+$(test -z "${JA_AUTOSTR}" || \
+printf '%s\n' "JA_AUTOSTR='${JA_AUTOSTR}'")
+$(test -z "${JA_JOB_STS}" || \
+printf '%s\n' "JA_JOB_STS='${JA_JOB_STS}'")
+$(test -z "${JA_USRACT_SUDO}" || \
+printf '%s\n' "JA_SUDO_USR='${JA_USRACT_SUDO}'")
+JA_DATESBM='$(date +%s)'
+$(test -n "${JA_JOB_STS}" || \
+printf '%s\n' "JA_DATERLS='$(date +%s)'")
+JA_JOB_LANGUAGE='${JA_LANGUAGE}'
+JA_PTY='${JA_PTY:-"3"}'
+$(test -z "${JA_ONERROR}" || \
+printf '%s\n' "JA_ONERROR='${JA_ONERROR}'")
+$(test -z "${hld}" || \
+printf '%s\n' "JA_HLD='${hld}'")
+EOF
+
+		_print_job_cmd > "${JA_JOB_DIR}job.cmd"
+
+		chmod "$(_mode "0777" "${JA_USR}")" "${JA_JOB_DIR}job.cmd"
+		[ -n "${hld}" ] || \
+			_usr_scdjobs_add
+		if _pipe_write "_usr_dir:${JA_USR}"; then
+			_usr_notify "User '${JA_USR}' submitted job '${JA_JOB}' to queue '${JA_JOBQ}'."
+		fi
+	else
+		_usr_notify "Error: Not authorized to create job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+	) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+	:
+}
+
+_splf_name() {
+	local splf
+	local job usr job_pid splfn
+	splf="${1}"
+
+	job="$(basename "$(dirname "${splf}")" '.job')"
+	usr="$(stat -c "%U" "${splf}")"
+	job_pid="$(basename "${splf}" | sed -re '\|job-([[:digit:]]+)-.*| s||\1|')"
+	splfn="$(basename "${splf}" | sed -re '\|job-[[:digit:]]+-(.*)\.splfa| s||\1|')"
+	printf "${splfn} ${job}.${usr}.${job_pid}"
+	:
+}
+
+_options_module() {
+	local module="${1}" var="${2:-"options"}"
+	sed -nre '\|^_'"${module}"'_'"${var}"'=|,\|"$| {
+		s|^_'"${module}"'_'"${var}"'="||
+		\|"$| {s|||p;q0}
+		p}
+		$ q1' "${JA_LIB}${module}.module" 2> /dev/null
+}
+
+_usage_options() {
+	local fnc="${1}"
+	local extraoption="${2:-"@JA_HELP"}@"
+	local options
+
+	options="$(_options_module "${fnc}")" || \
+		return 0
+
+	awk -v fnc="${fnc}" \
+		'$1 == fnc {for (i=8;i<=NF;i++) printf $i OFS
+		printf ORS
+		exit}' "${JA_CONF_CMDS}"
+	printf '\n'
+	awk -v tmp="${JA_TMP}" -v fnc="${fnc}" \
+		-v cparms="${JA_CONF_PARMS}" \
+		-v cparmdfts="${JA_CONF_PARMDFTS}" \
+		-v cparmvals="${JA_CONF_PARMVALS}" \
+		'BEGIN{PROCINFO["sorted_in"] = "@ind_num_asc"
+		f = tmp "class.lst" ; getline lst["class"] < f
+		f = tmp "jobds.lst" ; getline lst["jobds"] < f
+		f = tmp "jobqs.lst" ; getline lst["jobqs"] < f
+		f = tmp "outqs.lst" ; getline lst["outqs"] < f
+		f = tmp "sbsds.lst" ; getline lst["sbsds"] < f
+		f = tmp "rwtrs.lst" ; getline lst["rwtrs"] < f
+		f = tmp "rprts.lst" ; getline lst["rprts"] < f
+		f = tmp "users.lst" ; getline lst["users"] < f
+		while (getline < cparms > 0) {
+			if ($1 !~ "^#") {
+				# gsub("^,","",$4)
+				v[$1,2]=$2
+				split($3, a, ",")
+				if (v[$1,2] ~ "[i]")
+					v[$1,3] = " " "-[no]" substr(a[1],2) "|--[no]" substr(a[2],3)
+				else
+				if (v[$1,2] ~ "[a]")
+					v[$1,3] = " " a[1] "|" a[2]
+				else
+				if (v[$1,2] ~ "[c]")
+					v[$1,3] = " " a[1] "|" a[2] "=CHOICE"
+				else
+				if (v[$1,2] ~ "[h]")
+					v[$1,3] = " " a[1] "|" a[2] "=MCHOICE"
+				else
+				if (v[$1,2] ~ "[m]")
+					v[$1,3] = " " a[1] "|" a[2] "=MVALUE"
+				else
+					v[$1,3] = " " a[1] "|" a[2] "=VALUE"
+				for (i=6;i<=NF;i++) v[$1,1] = v[$1,1] $i " "
+			}
+		}
+		vold = ""
+		while (getline < cparmdfts > 0) {
+			if (vold != $1 && ($2 == fnc || $2 == "*")) {
+				vold = $1
+				d[$1]=$3
+			}
+		}
+		vold = ""
+		while (getline < cparmvals > 0) {
+			if (vold != $1 && ($2 == fnc || $2 == "*")) {
+				vold = $1
+				if ($3 ~ "^#") {
+					c[$1]=lst[substr($3,2,5)]
+					if ($3 ~ "^#.*M$")
+						c[$1]=c[$1] "|all"
+				} else {
+					c[$1] = $3
+				}
+			}
+		}
+		RS="[@\n]"}
+		$1 { if (v[$1,3] != "") {
+				if (v[$1,2] ~ "[vm]" && c[$1] == "" && d[$1] != "") {
+					c[$1]="//"
+				}
+				print v[$1,3], $2 v[$1,2], ":", v[$1,1], c[$1], d[$1]
+			} else
+				print "# error: " $1
+		}' <<< "${options}${extraoption}"
+	printf '\n'
+	:
+}
+
+_usage() {
+	local module="${1:-"${JA_MODULE}"}"
+	local usage
+	if usage="$(_options_module "${module}" "usage")"; then
+		printf '%s\n' "${usage}" >&2
+	fi
+	_usage_options "${module}" "@JA_ASSIST@JA_HELP">&2
+}
+
+_fd_save() {
+	local msgq="${JA_USRACT_DIR:-"${JA_USR_DIR}"}user.msgq"
+
+	# save actual fds for stdout and stderr
+	JA_FD_SAVE="Yes"
+	exec 6>&1
+	exec 7>&2
+	exec >> "${msgq}" 2>&1
+}
+
+_fd_restore() {
+	[ -n "${JA_FD_SAVE}" ] || \
+		return 0
+	exec 1>&6 6>&-
+	exec 2>&7 7>&-
+	JA_FD_SAVE=""
+	:
+}
+
+_jobadmin_env() {
+	local usr="${1}" usr_dir="${2}"
+
+	[ -L "${JA_SPOOL}${usr}.usr" ] || \
+		if _pipe_write "_usr_dir:${usr}"; then
+			_usr_notify "Creating jobadmin environment for user '${usr}'."
+		else
+			_usr_notify "Error: Can't create jobadmin environment for user '${usr}'."
+			exit 1
+		fi
+	if [ ! -d "${usr_dir}" ]; then
+		sleep 1
+		_sudo "${usr}" mkdir -p "${usr_dir}"
+	fi
+	:
+}
+
+_print_param() {
+	local n="${1}"
+	if [ -z "${n}" ] || \
+	( [ "$(printf '%q' "${n}")" != "${n}" ] && \
+	! grep -qsxe "^'.*'$" <<< "${n}"); then
+		printf '%s' "'${n}'"
+	else
+		printf '%s' "${n}"
+	fi
+}
+
+_print_cmd() {
+	local n k=""
+	for n in "${@}";do
+		[ -z "${k}" ] && \
+			k=1 || \
+			printf ' '
+		_print_param "${n}"
+	done
+	[ -z "${k}" ] || \
+		printf '\n' 
+	:
+}
+
+_print_job_cmd() {
+	printf '%s\n' '#!/bin/bash' '# jobadmin script'
+	_print_cmd "${JA_JOB_CMD[@]}"
+	:
+}
+
+_dialog_init() {
+	[ -n "${JA_DIALOG_TAILBOXMSG:+"${JA_DIALOG_TAILBOXMSG}"}" ] || \
+		JA_DIALOG_TAILBOXMSG="${JA_USRACT_DIR:-"${JA_USR_DIR}"}user.msgq"
+	_fd_restore
+	# variables that are already set in Bash environment, LINES and COLUMNS
+# 	export JA_DIALOG_SCREEN_HEIGHT=`tput lines`
+# 	export JA_DIALOG_SCREEN_WIDTH=`tput cols`
+# 	echo "lines,columns: ${LINES:-} ${COLUMNS:-}" >&2
+	export JA_DIALOG_SCREEN_WIDTH="${COLUMNS:-"$(dialog --print-maxsize --stdout | \
+		awk '{print $3}')"}"
+	export JA_DIALOG_SCREEN_HEIGHT="${LINES:-"$(dialog --print-maxsize --stdout | \
+		awk '{print $2}' | tr -d ',')"}"
+	export JA_DIALOG_WIDTH=$((${JA_DIALOG_SCREEN_WIDTH}))
+	export JA_DIALOG_HEIGHT=$((${JA_DIALOG_SCREEN_HEIGHT}-14))
+	_fd_save
+}
+
+_dialog_end() {
+	_fd_restore
+	#clear
+}
+
+_dialog_header_form() {
+	local r s column w
+	w=$((${JA_DIALOG_WIDTH}-3))
+	r=" "
+	column=0
+	for s in ${JA_DIALOG_FIELDS}; do
+		field_width="$(cut -f 2 -s -d ':' <<< "${s}")"
+		if grep -qs -e '\.$' <<< "${field_width}"; then
+			r="${r}$(printf "%${field_width}${field_width//[.]/}s" \
+				"$(cut -f 1 -s -d ':' <<< "${s}")" | tr ' ' '_')"
+		else
+			r="${r}$(printf "%.${field_width}s" \
+			"$(cut -f 1 -s -d ':' <<< "${s}")" | tr ' ' '_')"
+		fi
+		field_width="${field_width//[.]/}"
+		column=$((${column}+${field_width}+1))
+		[ ${column} -le ${w} ] || column=${w}
+		while [ $(sed -e 's|\\Z.||g' <<< "${r}" | wc --chars) -lt ${column} ]; do
+			r="${r}_"
+		done
+		r="${r} "
+	done
+	printf '%s\n' " ${JA_DIALOG_FKEYS}# ${JA_DIALOG_COMMANDS}#${r}"
+}
+
+_dialog_header() {
+# --trace "${JA_DIALOG_TRACE}"
+	printf '%s\n' "dialog --output-fd 7 --stdout --no-shadow --separator '#' \
+--colors \
+--begin $((${JA_DIALOG_HEIGHT})) 0 \
+--title Messages --tailboxbg ${JA_DIALOG_TAILBOXMSG} \
+$((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
+--and-widget \
+--begin 0 0 \
+--title ${1//[[:blank:]]/_} \
+--help-button --help-status \
+--extra-button --extra-label Rfrsh${autorefresh:+":AUTO"} \
+--last-key \
+--colors \
+--form '$(_dialog_header_form)' ${JA_DIALOG_HEIGHT} ${JA_DIALOG_WIDTH} $((${JA_DIALOG_HEIGHT}-8)) "
+}
+
+_dialog_line() {
+	local field field_input field_width column
+	local i dialog_fields
+
+	# suppress blank columns in the right side
+	for i in $(eval echo "{${#}..1}"); do
+		[ -z "$(eval echo "\${${i}}")" ] || \
+			break
+	done
+	dialog_fields="$(cut -f -${i} -d ' ' <<< "${JA_DIALOG_FIELDS}")"
+
+	column=1
+	for s in ${dialog_fields}; do
+		field1=""
+		field="$(cut -f 1 -d '#' <<< "${1}"| tr "'" '"')"
+		[[ ! "${field}" =~ ^- ]] || \
+			field=" ${field}"
+		field_width="$(awk 'BEGIN{FS="#"}
+			$3 ~ "^[[:digit:]]+$" {print $3}' <<< "${1}")"
+		field_width="${field_width:-"$(cut -f 2 -s -d ':' <<< "${s}")"}"
+		field_input="$(awk 'BEGIN{FS="#"}
+			$2 ~ "^[[:digit:]]+$" {print $2}' <<< "${1}")"
+		field_input="${field_input:-"$(cut -f 3 -s -d ':' <<< "${s}")"}"
+		if [ -z "${field_input}" ] || \
+		[ ${field_input} -lt 1 ]; then
+			field_input=0
+			if grep -qs -e '\.$' <<< "${field_width}"; then
+				field="$(printf "%${field_width}${field_width//[.]/}s" \
+					"${field}")"
+			else
+				field="$(printf "%.${field_width}s" "${field}")"
+			fi
+			printf '%s ' "'${field}'" "${line}" "${column}" "''" \
+				"${line}" "${column}" "0" "${field_input}"
+			printf '\n'
+		else
+			field="$(printf "%.${field_input}s" "${field}")"
+			printf '%s ' "''" "${line}" "${column}" "'${field}'" \
+				"${line}" "${column}" "${field_width}" "${field_input}"
+			printf '\n'
+		fi
+		field_width="${field_width//[.]/}"
+		column=$((${column}+${field_width}+1))
+		shift
+	done
+}
+
+_dialog_options() {
+	local value="${1}" prompt="${2}"
+	local w o
+
+	w=$((${JA_DIALOG_WIDTH}-15))
+	if [ ${w} -gt 80 ]; then
+		o=${w}
+	else
+		o=80
+	fi
+	[[ ! ${value} =~ ^- ]] || \
+		value=" ${value}"
+	printf '%s ' "'${prompt}:'" "${line}" "1" "'${value}'" \
+		"${line}" "12" "${w}" "${o}"
+	printf '\n'
+}
+
+_dialog_fkeys() {
+	awk -v fkeys="${1}" 'BEGIN{split(fkeys, fk)
+		for (v in fk) keys[fk[v]]}
+		$1 in keys {printf $2 " "}' "${JA_CONF_FKEYS}"
+}
+
+_dialog_exec() {
+	local dialogrc="${1}"
+	local M rc
+	rc=0
+	M="$(eval "DIALOGRC=${dialogrc} $(tr -s '#' '\n' <<< "${DIALOG//[$'\n']/ }")")" || \
+		rc="${?}"
+	sed -re '\|.*\[2J| s|||' <<< "${M}"
+#		\|^[[:blank:]]+| s|||
+#		\|[[:blank:]]+$| s|||' <<< "${M}"
+	return "${rc}"
+}
+
+_window_active() {
+	xprop -root _NET_ACTIVE_WINDOW 2> /dev/null | \
+		sed -nre '\|_NET_ACTIVE_WINDOW.*(0x[^,]+)[,].*| {s||\1|p;q0};${q1}'
+}
+
+# opens a new tab in the actual xterm
+# and types a command in it
+_new_tab_cmd() {
+	local xkbmap
+
+	[ -n "${1:-}" ] || \
+		return 1
+
+	WID="${WID:-"$(_window_active)"}" || \
+		return 1
+	xdotool windowactivate --sync "${WID}"
+	xdotool key --window "${WID}" --delay 1 "${JA_KEY_NEWTAB}" sleep 0.1
+
+	xkbmap="$(setxkbmap -query | \
+		sed -nre '\|^options| s||option|' \
+		-e '\|([^:[:blank:]]+)[:[:blank:]]+(.*)| s||-\1 \2|p')"
+#		sed -rn -e '\|\boptions\b| s||option|' \
+#		-e '\|([^:[:blank:]]+)[:][[:blank:]]+(.*)| s||-\1 \2|' \
+#		-e '1!G' \
+#		-e 'h' \
+#		-e '${s|[[:space:]]+| |g;p}'
+	setxkbmap us dvorak -rules xorg -model pc105 -option
+	# execute the command
+	xdotool windowactivate --sync "${WID}"
+	# typing an initial space will not save the command in the history
+	if [ "${#}" -eq 1 ]; then
+		xdotool type --window "${WID}" --delay 1 --clearmodifiers \
+			" ( ${1} ) && exit "
+	else
+		xdotool type --window "${WID}" --delay 1 --clearmodifiers \
+			" ( $(_print_cmd "${@}") ) && exit "
+	fi
+	xdotool key --window "${WID}" --delay 1 Return
+	setxkbmap ${xkbmap}
+	:
+}
+
+# execute a raw command, not provided by jobadmin
+_cmd_exec_shell() {
+	JA_CMD_CMD=""
+
+	[ -n "${cmd_options}" ] || \
+		return 1
+
+	_usr_notify "Issued command: ${cmd_options}" \
+		"" "y"
+	cmd_index=0
+	case "${JA_XTERM_TABS:+"${TERM}"}" in
+	xterm*)
+		if [ -z "${JA_KONSOLE:-}" ]; then
+			( _new_tab_cmd "${cmd_options}" ) &
+			wait -f "${!}" || :
+		else
+			cmd_term="$(echo "${JA_KONSOLE_NOCLOSE}" | \
+				sed -e "s|TITLE|$(awk '{print $1}' <<< "${cmd_options}")|")"
+			if [ -z "${JA_DEBUG}" ]; then
+				( > /dev/null 2>&1 eval setsid ${cmd_term} \
+					${cmd_options} ) &
+				wait -f "${!}" || :
+			else
+				( eval setsid ${cmd_term} \
+					${cmd_options} ) &
+				wait -f "${!}" || :
+			fi
+		fi
+		;;
+	*)
+		_fd_restore
+		( ${cmd_options} ) &
+		wait -f "${!}" || :
+		_fd_save
+		;;
+	esac
+	_cmd_save "${cmd_options}"
+	sleep 1
+}
+
+_cmd_verify() {
+	local module="${1}"
+	local options_getopt="$( _options_getopt \
+		"$(_options_module "${module}")" "${module}" "y" )"
+	shift
+	export LNET_GETOPT_ALLVARS="Yes"
+	getopt-sh "${@}" <<< "${options_getopt//@/$'\n'}" > /dev/null 2>&1
+}
+
+# cmd return code is given to the calling procedure
+_cmd_exec_background() {
+	[ -n "${JA_FKEY_ASSIST:-}" ] || \
+		[ -z "${JA_CMD_VERIFY:-}" ] || \
+		_cmd_verify "${JA_CMD_CMD#* }" "${JA_CMD_ARGS[@]:-}" || \
+		JA_FKEY_ASSIST="Yes"
+
+	if [ -n "${JA_FKEY_ASSIST:-}" ]; then
+		_cmd_exec
+		return 0
+	fi
+	_cmd_save
+	( ${JA_CMD_CMD} "${JA_CMD_ARGS[@]:-}" ) > /dev/null 2>&1 &
+	wait -f "${!}" || \
+		return "${?}"
+}
+
+_cmd_exec() {
+	local cmd cmd_usropt
+	JA_DIALOG_TAILBOXMSG_CLEAR=""
+	cmd="${JA_CMD_CMD#* }"
+	[ -n "${cmd}" ] || \
+		return 1
+
+	if [ "${cmd}" != "jobadmin" ] && \
+	[ -z "${JA_FKEY_ASSIST:-}" ] && \
+	[ -n "${JA_CMD_VERIFY:-}" ]; then
+		_cmd_verify "${cmd}" "${JA_CMD_ARGS[@]:-}" || \
+		JA_FKEY_ASSIST="Yes"
+	fi
+
+	cmd_usropt="$(awk -v cmd="${cmd}" '$1 == cmd {print $3; exit}' \
+		"${JA_CONF_CMDS}")"
+	if [ -z "${JA_CMD_ARGS[1]+"a"}" ]; then
+		JA_CMD_ARGS=()
+	fi
+	case "${cmd}" in
+	jobadmin*|sbmjob|chgjob)
+		[ "${cmd_usropt}" != "1" ] || \
+		if [ "${JA_USR}" != "$(id -un)" ] && \
+		! grep -qswE "$(awk '$1 == "JA_USR" {
+		sub(",","|",$3);sub("-","\\-",$3);print $3}' \
+		"${JA_CONF_PARMS}")" <<< "${JA_CMD_ARGS[@]:-}"; then
+			JA_CMD_ARGS=("--user" "${JA_USR}" \
+				$(_print_cmd "${JA_CMD_ARGS[@]}") )
+		fi
+		;;
+	*)
+		if [ "${cmd_usropt}" = "1" ] && \
+		[ "${JA_USR}" != "$(id -un)" ] && \
+		! grep -qswE "$(awk '$1 == "JA_USR" {
+		sub(",","|",$3);sub("-","\\-",$3);print $3}' \
+		"${JA_CONF_PARMS}")" <<< "${JA_CMD_ARGS[@]:-}"; then
+			JA_CMD_ARGS+=("--user" "${JA_USR}")
+		fi
+		;;
+	esac
+	if [ -n "${JA_FKEY_ASSIST:-}" ] && \
+	[ "${cmd}" != "jobadmin" ]; then
+		JA_CMD_CMD="jobadmin ${JA_CMD_CMD}"
+	fi
+	cmd_index=0
+	case "${JA_XTERM_TABS:+"${TERM}"}" in
+	xterm*)
+		if [ -z "${JA_KONSOLE:-}" ]; then
+			( _new_tab_cmd ${JA_CMD_CMD} "${JA_CMD_ARGS[@]:-}" ) &
+			wait -f "${!}" || :
+		else
+			cmd_term="$(sed -e "s|TITLE|${JA_CMD_CMD}_${JA_CMD_ARGS[1]:-}|" \
+				<<< "${JA_KONSOLE}")"
+			if [ -z "${JA_DEBUG}" ]; then
+				( > /dev/null 2>&1 eval setsid ${cmd_term} \
+					$(_print_cmd ${JA_CMD_CMD} "${JA_CMD_ARGS[@]}") ) &
+				wait -f "${!}" || :
+			else
+				( eval setsid ${cmd_term} \
+				$(_print_cmd ${JA_CMD_CMD} "${JA_CMD_ARGS[@]}") ) &
+				wait -f "${!}" || :
+			fi
+		fi
+		;;
+	*)
+		_fd_restore
+		( ${JA_CMD_CMD} "${JA_CMD_ARGS[@]:-}" ) &
+		wait -f "${!}" || :
+		_fd_save
+		;;
+	esac
+	_cmd_save
+	sleep 1
+	:
+}
+
+_cmd_save() {
+	local cmd
+
+	[ -n "${JA_HISTORY:-}" ] || \
+		return 0
+
+	cmd="${1:-"$(_print_cmd ${JA_CMD_CMD} "${JA_CMD_ARGS[@]:-}")"}"
+
+	[ -n "${cmd}" ] && \
+	[[ ! ${cmd} =~ ^[[:blank:]] ]] || \
+		return 1
+
+	history -c
+	history -s ${cmd}
+	history -a
+	:
+}
+
+_cmd_retrieve() {
+	local l
+	local c=0
+
+	history -c && \
+		history -r || \
+		return 0
+	l="$(history 1 | awk 'END{print $1}')"
+	[ -n "${l}" ] || \
+		return 0
+
+	while :; do
+		cmd_index="${cmd_index:-"1"}"
+		[ 1 -le ${cmd_index} ] || \
+			cmd_index=1
+		[ ${cmd_index} -lt ${l} ] || \
+			cmd_index=${l}
+		if history ${cmd_index} | \
+		sed -nre '\|^[[:blank:]]*[[:digit:]]+[[:blank:]]+([^[:blank:]]+.*)$|{s||\1|p;q0};q1'; then
+			return 0
+		fi
+		c=$((${c}+1))
+		[ ${c} -lt 3 ] || \
+			return 0
+		cmd_index=$((${cmd_index}+1))
+	done
+	:
+}
+
+_cmd_last() {
+	history -c && \
+		history -r || \
+		return 0
+	history 1 | \
+		sed -nre '\|^[[:blank:]]*[[:digit:]]+[[:blank:]]+([^[:blank:]]+.*)$| s||\1|p'
+}
+
+_dspfiles() {
+	[ -z "${JA_XCMDEDIT:-}" ] && \
+		pager "${@}" || \
+		( > /dev/null 2>&1 setsid setsid ${JA_XCMDEDIT} "${@}" )
+}
+
+_printvars() {
+	local attrs
+	local var
+	attrs="${1}"
+	while read -r var; do
+		if grep -qs -e '^JA_DATE' <<< "${var}"; then
+			printf '%s %s\n' "${var}" "$(LANGUAGE="${JA_LANGUAGE}" \
+				date --date="@$(sed -e "s|'||g" <<< "${var#*=}")" \
+				+'%Y-%m-%d %H:%M:%S')"
+		else
+			printf '%s\n' "${var}"
+		fi
+	done < <(grep -se '^JA_' "${attrs}" | sort)
+}
+
+_find_job_files() {
+	local filename filecheck files
+	filename="${1}"
+	filecheck="${2}"
+
+	if [ -e "${filecheck}" ]; then
+		files="$(_expand_glob "${JA_SPOOL}*.usr/*.job")" || \
+			return 0
+		find ${files} \
+			-mindepth 1 -maxdepth 1 -type f \
+			-name "${filename}" -newer "${filecheck}"
+	else
+		_expand_glob "${JA_SPOOL}*.usr/*.job/${filename}" || \
+			return 0
+	fi 2> /dev/null
+}
+
+_options_getopt() {
+	local options="${1}"
+	local fnc="${2}"
+	local no_extraoption="${3:-}"
+	local extraoption="@"
+
+	if [ -z "${no_extraoption}" ]; then
+		if [ "${JA_MODULE}" = "jobadmin" ]; then
+			grep -qs -we "JA_JOB_CMD" <<< "${options}" || \
+				extraoption="@JA_HELP@"
+		else
+			extraoption="@JA_ASSIST@JA_HELP@"
+		fi
+	fi
+
+	awk -v tmp="${JA_TMP}" \
+		-v fnc="${fnc}" \
+		-v cparms="${JA_CONF_PARMS}" \
+		-v cparmdfts="${JA_CONF_PARMDFTS}" \
+		-v cparmvals="${JA_CONF_PARMVALS}" \
+		'BEGIN{
+		f = tmp "class.lst" ; getline lst["class"] < f
+		f = tmp "jobds.lst" ; getline lst["jobds"] < f
+		f = tmp "jobqs.lst" ; getline lst["jobqs"] < f
+		f = tmp "outqs.lst" ; getline lst["outqs"] < f
+		f = tmp "sbsds.lst" ; getline lst["sbsds"] < f
+		f = tmp "rwtrs.lst" ; getline lst["rwtrs"] < f
+		f = tmp "rprts.lst" ; getline lst["rprts"] < f
+		f = tmp "users.lst" ; getline lst["users"] < f
+		while (getline < cparms > 0) {
+			if ($1 !~ "^#") {
+				# gsub("^,","",$4)
+				v[$1,2]=$2; v[$1,3]=$3
+			}
+		}
+		vold=""
+		while (getline < cparmdfts > 0) {
+			if (vold != $1 && ($2 == fnc || $2 == "*")) {
+				vold=$1
+				d[$1]=$3
+			}
+		}
+		vold=""
+		while (getline < cparmvals > 0) {
+			if (vold != $1 && ($2 == fnc || $2 == "*")) {
+				vold=$1
+				if ($3 ~ "^#") {
+					c[$1]=lst[substr($3,2,5)]
+					if ($3 ~ "^#users")
+						c[$1]="current," c[$1]
+					if ($3 ~ "^#.*M$")
+						c[$1]=c[$1] "|all"
+				} else {
+					c[$1]=$3
+				}
+			}
+		}
+		RS="[@\n]"; ORS="@"}
+		$1 { if (v[$1,3] != "") {
+				if (v[$1,2] ~ "[vm]" && c[$1] == "" && d[$1] != "") {
+					c[$1] = "//"
+				}
+				print v[$1,3], $2 v[$1,2], $1, c[$1], d[$1]
+			}
+			else
+				print "# error: " $1
+		}' <<< "${options}${extraoption}"
+}
+
+_options_reuse() {
+	# global JA_CMD_ARGS JA_OPTIONS
+	local module="${1}"
+	shift
+	local opts_vals=( "${@}" )
+	local opt opt_val
+
+	for opt in $(awk 'BEGIN{RS="[@\n]"}
+	$1 {print $1}' < <(_options_module "${module}") ); do
+		if opt_val="$(grep -s -m 1 -e "^${opt}=" \
+		< <(printf '%s\n' "${opts_vals[@]}"))"; then
+			opt_val="${opt_val#*=}"
+		elif awk -v opt="${opt}" \
+		'BEGIN{RS="[@\n]"}
+		$1 == opt {rc=-1; exit}
+		END{exit rc+1}' <<< "${JA_OPTIONS}"; then
+			opt_val="$(eval echo "\${${opt}}")"
+		fi
+		[ -z "${opt_val}" ] || \
+			JA_CMD_ARGS+=( "$(awk -v opt="${opt}" \
+			'$1 == opt {print $3; exit}' "${JA_CONF_PARMS}" | \
+			cut -f 2 -d ',')" \
+			"${opt_val}" )
+	done
+	:
+}
+
+_lastkey_detect() {
+	local lastkey="${1}"
+	JA_FKEY_DSPMSG=""; JA_FKEY_END=""; JA_FKEY_ASSIST=""; JA_FKEY_REFRESH="";
+	JA_FKEY_PARMS=""; JA_FKEY_RETRIEVE=""; JA_FKEY_AUTOREFRESH="";
+	JA_FKEY_CONFIRM=""; JA_FKEY_CHGVIEW=""; JA_FKEY_CANCEL=""
+	case "${lastkey}" in
+	266) # F2
+		JA_FKEY_DSPMSG="Yes"
+		;;
+	267) # F3
+		JA_FKEY_END="Yes"
+		;;
+	268) # F4
+		JA_FKEY_ASSIST="Yes"
+		;;
+	269) # F5
+		JA_FKEY_REFRESH="Yes"
+		;;
+	270) # F6
+		JA_FKEY_PARMS="Yes"
+		;;
+	273) # F9
+		JA_FKEY_RETRIEVE="Yes"
+		;;
+	274) # F10
+		JA_FKEY_CONFIRM="Yes"
+		;;
+	275) # F11
+		JA_FKEY_CHGVIEW="Yes"
+		;;
+	276) # F12
+		JA_FKEY_CANCEL="Yes"
+		;;
+	281) # F17
+		JA_FKEY_AUTOREFRESH="Yes"
+		;;
+	esac
+	:
+}
+
+_jobadmin_error() {
+  local parent_lineno="${1:-}"
+  local cmd="${2:-}"
+  local message="${3:-}"
+  local code="${4:-1}"
+  if [ -n "${message}" ]; then
+    echo "Error on command '${cmd}' near line ${parent_lineno}:" \
+		"${message}; exiting with status ${code}" >&2
+  else
+    echo "Error on command '${cmd}' near line ${parent_lineno};" \
+		"exiting with status ${code}" >&2
+  fi
+  exit "${code}"
+}
+
+trap '_jobadmin_error "${LINENO}" "${BASH_COMMAND}"' ERR

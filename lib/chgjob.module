@@ -1,0 +1,215 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+#
+
+_chgjob_options="JA_JOB pr@
+JA_JOBQ o@
+JA_OUTQ o@
+JA_OUTHLD o@
+JA_SPLFSAV o@
+JA_OUTPTY o@
+JA_LJOIN o@
+JA_PWD o@
+JA_SAVED o@
+JA_PTY o@
+JA_AUTOSTR o@
+JA_DBG o@
+JA_ONERROR o@
+JA_USR@
+JA_JOB_CMD o"
+
+_chgjob() {
+	local chgjob
+	local jobd jobq outq pty pwd ljoin debug splfhld job_cmd
+	local splfsav jobsav
+	local attrs v val fd1
+
+	chgjob=""
+	attrs="${JA_JOB_DIR}job.attrs"
+
+	if ! _test_rw "${JA_JOB_DIR}job.cmd" || \
+	! _test_rw "${attrs}"; then
+		_usr_notify "Error: Not authorized to change job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+
+	if [ -n "${JA_JOBQ}" ]; then
+		if _jobq_dsc "${JA_JOBQ}"; then
+			jobq="$(_read_option "JA_JOBQ" "${attrs}")" || :
+			[ "${JA_JOBQ}" = "${jobq}" ] || \
+				chgjob="${chgjob}
+JA_JOBQ ${JA_JOBQ}"
+		else
+			_usr_notify "Error: invalid job queue '${JA_JOBQ}'."
+			return 1
+		fi
+	fi
+
+	if [ -n "${JA_OUTQ}" ]; then
+		if _outq_dsc "${JA_OUTQ}"; then
+			outq="$(_read_option "JA_OUTQ" "${attrs}")" || :
+			[ "${JA_OUTQ}" = "${outq}" ] || \
+				chgjob="${chgjob}
+JA_OUTQ ${JA_OUTQ}"
+		else
+			_usr_notify "Error: invalid output queue '${JA_OUTQ}'."
+			return 1
+		fi
+	fi
+
+	if [ -n "${JA_OUTHLD}" ]; then
+		[ "${JA_OUTHLD}" = "Yes" ] || \
+			JA_OUTHLD=""
+		splfhld="$(_read_option "JA_OUTHLD" "${attrs}")" || :
+		[ "${JA_OUTHLD}" = "${splfhld}" ] || \
+			chgjob="${chgjob}
+JA_OUTHLD ${JA_OUTHLD}"
+	fi
+
+	if [ -n "${JA_SPLFSAV}" ]; then
+		[ "${JA_SPLFSAV}" = "Yes" ] || \
+			JA_SPLFSAV=""
+		splfsav="$(_read_option "JA_SPLFSAV" "${attrs}")" || :
+		[ "${JA_SPLFSAV}" = "${splfsav}" ] || \
+			chgjob="${chgjob}
+JA_SPLFSAV ${JA_SPLFSAV}"
+	fi
+
+	if [ -n "${JA_OUTPTY}" ]; then
+		pty="$(_read_option "JA_OUTPTY" "${attrs}")" || :
+		[ "${JA_OUTPTY}" = "${pty}" ] || \
+			chgjob="${chgjob}
+JA_OUTPTY ${JA_OUTPTY}" || :
+	fi
+
+	if [ -n "${JA_LJOIN}" ]; then
+		[ "${JA_LJOIN}" = "Yes" ] || \
+			JA_LJOIN=""
+		ljoin="$(_read_option "JA_LJOIN" "${attrs}")" || :
+		[ "${JA_LJOIN}" = "${ljoin}" ] || \
+			chgjob="${chgjob}
+JA_LJOIN ${JA_LJOIN}"
+	fi
+
+	if [ -n "${JA_SAVED}" ]; then
+		[ "${JA_SAVED}" = "Yes" ] || \
+			JA_SAVED=""
+		jobsav="$(_read_option "JA_SAVED" "${attrs}")" || :
+		[ "${JA_SAVED}" = "${jobsav}" ] || \
+			chgjob="${chgjob}
+JA_SAVED ${JA_SAVED}"
+	fi
+
+	if [ -n "${JA_AUTOSTR}" ]; then
+		[ "${JA_AUTOSTR}" = "Yes" ] || \
+			JA_AUTOSTR=""
+		jobautostr="$(_read_option "JA_AUTOSTR" "${attrs}")" || :
+		[ "${JA_AUTOSTR}" = "${jobautostr}" ] || \
+			chgjob="${chgjob}
+JA_AUTOSTR ${JA_AUTOSTR}"
+	fi
+
+	if [ -n "${JA_PWD}" ]; then
+		if [ ! -d "${JA_PWD}" ]; then
+			_usr_notify "Error: directory '${JA_PWD}' not found."
+			return 1
+		fi
+	fi
+	if [ -n "${JA_PWD}" ]; then
+		if [ -d "${JA_PWD}" ]; then
+			JA_PWD="$(_realpath "${JA_PWD}")"
+			pwd="$(_read_option "JA_PWD" "${attrs}")" || :
+			[ "${JA_PWD}" = "${pwd}" ] || \
+				chgjob="${chgjob}
+JA_PWD ${JA_PWD}" || :
+		else
+			_usr_notify "Error: directory '${JA_PWD}' not found."
+			return 1
+		fi
+	fi
+
+	if [ -n "${JA_PTY}" ]; then
+		pty="$(_read_option "JA_PTY" "${attrs}")" || :
+		[ "${JA_PTY}" = "${pty}" ] || \
+			chgjob="${chgjob}
+JA_PTY ${JA_PTY}" || :
+	fi
+
+	if [ -n "${JA_DBG}" ]; then
+		[ "${JA_DBG}" = "Yes" ] || \
+			JA_DBG=""
+		debug="$(_read_option "JA_DBG" "${attrs}")" || :
+		[ "${JA_DBG}" = "${debug}" ] || \
+		chgjob="${chgjob}
+JA_DBG ${JA_DBG}"
+	fi
+
+	if [ -n "${JA_ONERROR}" ]; then
+		onerr="$(_read_option "JA_ONERROR" "${attrs}")" || :
+		[ "${JA_ONERROR}" = "${onerr}" ] || \
+		chgjob="${chgjob}
+JA_ONERROR ${JA_ONERROR}"
+	fi
+
+	if [ -n "${JA_JOB_CMD}" ]; then
+		if job_cmd="$(awk 'NR == 2 && $0 != "# jobadmin script" {exit 1}
+NR == 3' "${JA_JOB_DIR}job.cmd")"; then
+			[ "$(_print_cmd "${JA_JOB_CMD[@]}")" = "${job_cmd}" ] || \
+				chgjob="${chgjob}
+JA_JOB_CMD $(printf "%s " "${JA_JOB_CMD[@]}")"
+		else
+			_usr_notify "Warning: job '${JA_JOB}.${JA_USR}' contains a custom script."
+		fi
+	fi
+
+	if [ -n "${chgjob}" ]; then
+		(	if ! flock --exclusive --timeout 1 ${fd1}; then
+			_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+			return 1
+		fi
+		_usr_notify "Changing job '${JA_JOB}.${JA_USR}'."
+		while read v val; do
+			[ -n "${v}" ] || continue
+			if [ "${v}" = "JA_JOB_CMD" ]; then
+				_print_job_cmd > "${JA_JOB_DIR}job.cmd"
+				_usr_notify "$(printf '%s=( ' "${v}")$(_print_cmd "${JA_JOB_CMD[@]}"))"
+			else
+				_set_option "${attrs}" "${v}" "${val}"
+				_usr_notify "$(printf '%s=%s' "${v}" "'${val}'")"
+			fi
+		done <<< "${chgjob}"
+		if _pipe_write "_jobadmin"; then
+			_usr_notify "Done."
+		fi
+		) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+	else
+		_usr_notify "Warning: No changes suggested."
+	fi
+} # chgjob

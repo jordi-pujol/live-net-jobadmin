@@ -1,0 +1,2 @@
+others/jobadmin-crontab		/etc/cron.d
+others/01jobadmin			/etc/pm/sleep.d

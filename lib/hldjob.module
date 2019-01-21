@@ -1,0 +1,68 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# hold a job
+
+_hldjob_usage="Hold Job
+
+hldjob -j|--job 'JOBNAME'
+
+- hold a job"
+
+_hldjob_options="JA_JOB pr@
+JA_USR"
+
+_hldjob() {
+	local sts attrs hld fd1
+
+	attrs="${JA_JOB_DIR}job.attrs"
+
+	if ! _test_rw "${attrs}"; then
+		_usr_notify "Error: Not authorized to manage job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+
+	sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
+		sts="JOBQ"
+	if hld="$(_read_option "JA_HLD" "${attrs}")"; then
+		_usr_notify "Warning: job '${JA_JOB}.${JA_USR}' is already held, current status '${sts}/${hld}'."
+	fi
+	if [ "${sts}" = "OUTQ" ]; then
+		[ -z "${hld}" ] || \
+			_set_option "${attrs}" "JA_HLD" ""
+		_usr_notify "Warning: job '${JA_JOB}.${JA_USR}' is already held, current status '${sts}'."
+	elif _set_option "${attrs}" "JA_HLD" "HLD"; then
+		[ -n "${hld}" ] || \
+			_usr_notify "Holding job '${JA_JOB}.${JA_USR}', current status '${sts}/HLD'."
+	else
+		_usr_notify "Error: Not authorized to manage job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+	_usr_scdjobs_remove
+} # hldjob

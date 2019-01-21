@@ -1,0 +1,115 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# Delete a Job
+
+_dltjob_usage="Delete Job
+
+dltjob -j|--job 'JOBNAME'
+
+delete a job and their related executions data"
+
+_dltjob_options="JA_JOB pr@
+JA_USR pr@
+JA_PIDL pr@
+JA_KEEP pr@"
+
+_dltjob_by_pid() {
+	# global rc attrs job_pids
+	local job_pid="${1}"
+	local f found ja_pids
+
+	found=""
+	while read f; do
+		[ -e "${f}" ] || \
+			continue
+		rm -f "${f}"
+		found="y"
+	done < <(find "${JA_JOB_DIR}" -maxdepth 1 -type f \
+	-name "job-${job_pid}[^[:digit:]]*")
+	if [ -n "${found}" ]; then
+		_usr_notify "Removing job execution '${JA_JOB}.${JA_USR}.${job_pid}'."
+		if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]+[[:blank:]]*| \
+		{s|||p;q0};q1" <<< "${job_pids}")"; then
+			job_pids="${ja_pids}"
+			_set_option "${attrs}" "JA_PIDS" "${ja_pids}"
+		fi
+	else
+		rc=1
+		_usr_notify "Error: job execution '${JA_JOB}.${JA_USR}.${job_pid}' doesn't exist."
+	fi
+}
+
+_dltjob() {
+	local fd1 job_pid
+	local rc attrs job_pids # global
+
+	if ! _test_rw "${JA_JOB_DIR}"; then
+		_usr_notify "Error: Not authorized to delete job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+
+	( if ! flock --exclusive --timeout 1 ${fd1}; then
+		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+		return 1
+	fi
+	rc=0
+	if [ "${JA_PIDL}" = "all" ]; then
+		if [ "${JA_KEEP}" -eq 0 ]; then
+			rm -rf "${JA_JOB_DIR}"
+			[ ! -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" ] || \
+				printf '%s\n' "g/^${JA_JOB}$/d" 'w' | \
+				ed -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" || :
+			_usr_notify "Removing job '${JA_JOB}.${JA_USR}'."
+		else
+			attrs="${JA_USR_DIR}${JA_JOB}.job/job.attrs"
+			if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
+				for job_pid in $(tr -s ' ' '\n' <<< "${job_pids}" | \
+				head --lines="-${JA_KEEP}" | \
+				cut -f 1 -d ':'); do
+					_dltjob_by_pid "${job_pid}"
+				done
+			else
+				_usr_notify "Warning: no executions exist for '${JA_JOB}.${JA_USR}'."
+			fi
+		fi
+	else
+		attrs="${JA_USR_DIR}${JA_JOB}.job/job.attrs"
+		if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
+			for job_pid in $(tr -s ',' ' ' <<< "${JA_PIDL}"); do
+				_dltjob_by_pid "${job_pid}"
+			done
+		else
+			_usr_notify "Warning: no executions exist for '${JA_JOB}.${JA_USR}'."
+		fi
+	fi
+
+	return $rc
+	) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+} # dltjob

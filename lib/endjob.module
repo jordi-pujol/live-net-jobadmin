@@ -1,0 +1,90 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# terminate job
+
+_endjob_usage="End Job
+
+endjob -j|--job 'JOBNAME' [ -e|--pid 'JOBPID' ]
+
+- terminate job"
+
+_endjob_options="JA_JOB pr@
+JA_USR@
+JA_PID"
+
+_endjob() {
+	local attrs sts ppid c fd1
+
+	[ -n "${JA_PID}" ] || \
+		JA_PID="$(_job_exist_exec)" || \
+			return 1
+	attrs="${JA_JOB_DIR}job.attrs"
+	if ! test -r "${attrs}"; then
+		_usr_notify "Error: not authorized to manage job '${JA_JOB}.${JA_USR}.${JA_PID}'."
+		return 1
+	fi
+
+	(	if ! flock --shared --nonblock ${fd1}; then
+			_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+			return 1
+		fi
+	if ! sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
+	[ "${sts}" != "ACT" ]; then
+		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' can't be stopped, current status '${sts}'."
+		return 1
+	fi
+
+	if kill -0 "${JA_PID}" > /dev/null 2>&1; then
+		_sudo "" kill -TERM -${JA_PID} >/dev/null 2>&1
+		for c in {0..4}; do
+			kill -0 "${JA_PID}" > /dev/null 2>&1 || \
+				break
+			[ ${c} -eq 0 ] && \
+				printf '%s' 'Waiting for job end .' >&2 || \
+				printf '%s' '.' >&2
+			sleep 1
+		done
+		[ ${c} -eq 0 ] || \
+			printf '\n' >&2
+		# screen and systemd-run create a child process group
+		if ppid="$(_pid_parent "${JA_PID}")"; then
+			! kill -0 "${ppid}" > /dev/null 2>&1 || \
+				_sudo "" kill -KILL -${ppid} >/dev/null 2>&1
+		fi
+	else
+		_set_option "${attrs}" "JA_JOB_STS" "" && \
+		if _pipe_write "_jobadmin"; then
+			_usr_notify "Done."
+		fi
+	fi
+
+	_usr_notify "Ending job '${JA_JOB}.${JA_USR}.${JA_PID}'."
+	) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+} # endjob

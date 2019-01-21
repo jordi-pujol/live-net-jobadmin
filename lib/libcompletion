@@ -1,0 +1,154 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+_jobadmin_opts() {
+	local all="${2:-}"
+	[ -z "${all}" ] || \
+	! grep -qswe "${all}" <<< "${cur}" || \
+		return 0
+	local opt ind=""
+	for opt in ${1//[^[:alnum:]_]/ }; do
+		if  grep -qswe "${opt}" <<< "${cur}"; then
+			ind="y"
+		else
+			printf '%s\n' "${opt}"
+		fi
+	done
+	[ -n "${ind}" ] || \
+		printf '%s\n' "${all}"
+}
+
+_jobadmin_extopts() {
+	local str="${1}"
+	_jobadmin_opts "${str%%|*}" \
+		"$(cut -f 2 -s -d "|" <<< "${str}")"
+}
+
+_jobadmin_rprts() {
+	_jobadmin_opts "$(cat "${JA_TMP}rprts.lst")"
+}
+
+_jobadmin_class() {
+	_jobadmin_opts "$(cat "${JA_TMP}class.lst")"
+}
+
+_jobadmin_jobds() {
+	_jobadmin_opts "$(cat "${JA_TMP}jobds.lst")"
+}
+
+_jobadmin_jobqs() {
+	_jobadmin_opts "$(cat "${JA_TMP}jobqs.lst")"
+}
+
+_jobadmin_jobqsM() {
+	_jobadmin_opts "$(cat "${JA_TMP}jobqs.lst")" "all"
+}
+
+_jobadmin_outqs() {
+	_jobadmin_opts "$(cat "${JA_TMP}outqs.lst")"
+}
+
+_jobadmin_outqsM() {
+	_jobadmin_opts "$(cat "${JA_TMP}outqs.lst")" "all"
+}
+
+_jobadmin_sbsds() {
+	_jobadmin_opts "$(cat "${JA_TMP}sbsds.lst")"
+}
+
+_jobadmin_sbsdsM() {
+	_jobadmin_opts "$(cat "${JA_TMP}sbsds.lst")" "all"
+}
+
+_jobadmin_users() {
+	_jobadmin_opts "current $(cat "${JA_TMP}users.lst")"
+}
+
+_jobadmin_usersM() {
+	_jobadmin_opts "current $(cat "${JA_TMP}users.lst")" "all"
+}
+
+_jobadmin_rwtrs() {
+	_jobadmin_opts "$(cat "${JA_TMP}rwtrs.lst")"
+}
+
+_jobadmin_rwtrsM() {
+	_jobadmin_opts "$(cat "${JA_TMP}rwtrs.lst")" "all"
+}
+
+_jobadmin_jobs() {
+	2> /dev/null \
+	basename -s '.job' \
+		$(ls -1d "$(readlink -f "${JA_SPOOL}${USER}.usr")/"*.job)
+}
+
+_jobadmin_msgqs() {
+	2> /dev/null \
+	basename -s '.msgq' \
+		$(ls -1d "$(readlink -f "${JA_SPOOL}${USER}.usr")/"*.msgq)
+}
+
+_jobadmin_modules() {
+	2> /dev/null \
+	basename -s '.module' "${JA_LIB}"*.module
+}
+
+_jobadmin_mchoice() {
+	local opts="${1}"
+	[ -n "${opts}" ] || \
+		return 0
+	local lastopt=${cur/*,} prevopt=
+	[[ $cur == *,* ]] && prevopt=${cur%,*},
+	COMPREPLY=( $( compgen -P "$prevopt" -W "${opts}" -- "$lastopt" ) )
+}
+
+[ "$(type -t "_parse_help_exclude")" = "function" ] || \
+	. "${JA_LIB}libcompletionexclude"
+
+_jobadmin_cur_arg() {
+	local pos=${1}
+	COMPREPLY=( $( compgen \
+			-W '$(_parse_help_exclude "${module}")' \
+			-- "$cur" ) )
+	[[ $COMPREPLY == *= ]] && compopt -o nospace
+	:
+}
+
+_jobadmin_pos_arg() {
+	local mpos="${1}" w pos=0
+	while [ ${pos} -lt ${mpos} ] && \
+	read w && \
+	[[ ! ${w} =~ ^-.* ]]; do
+		pos=$((${pos}+1))
+	done < <(printf '%s\n' "${words[@]}" | \
+		tail --lines=+2)
+	echo ${pos}
+}
+
+:

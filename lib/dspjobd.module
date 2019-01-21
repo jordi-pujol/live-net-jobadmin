@@ -1,0 +1,61 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# display jobd - a job description
+
+_dspjobd_usage="Display Job Description
+
+dspjobd -d|--jobd 'jobd'
+
+- display job description properties"
+
+_dspjobd_options="JA_JOBD pr"
+
+_dspjobd() {
+	if ! _jobd_dsc "${JA_JOBD}"; then
+		_usr_notify "Error: Not authorized to manage job description '${JA_JOBD}'."
+		return 1
+	fi
+
+	(
+		_usr_notify "Displaying job description '${JA_JOBD}'."
+		# TODO: formatted listing of the jobd
+		printf '%s\n\n' "Job description '${JA_JOBD}'"
+		printf '%s=%s\n' "JA_JOBD_JOBQ" "${JA_JOBD_JOBQ}"
+		printf '%s=%s\n' "JA_JOBD_OUTQ" "${JA_JOBD_OUTQ}"
+		printf '%s=%s\n' "JA_JOBD_SPLFHLD" "${JA_JOBD_SPLFHLD}"
+		printf '%s=%s\n' "JA_JOBD_OUTPTY" "${JA_JOBD_OUTPTY}"
+		printf '%s=%s\n' "JA_JOBD_LJOIN" "${JA_JOBD_LJOIN}"
+		printf '%s=%s\n' "JA_JOBD_HLD" "${JA_JOBD_HLD}"
+		printf '%s=%s\n' "JA_JOBD_PTY" "${JA_JOBD_PTY}"
+		printf '%s=%s\n' "JA_JOBD_DBG" "${JA_JOBD_DBG}"
+		printf '%s=%s\n' "JA_JOBD_ONERROR" "${JA_JOBD_ONERROR}"
+	) 2>&1 | pager
+	:
+} # dspjobd

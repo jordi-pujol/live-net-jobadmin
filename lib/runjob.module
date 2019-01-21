@@ -1,0 +1,139 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# run a job
+
+_runjob_usage="Run a Job interactively
+
+runjob -j|--job 'JOBNAME' [-c|--cls class-of-service] [-u|--usr user]
+
+- run a job"
+
+_runjob_options="JA_JOB pr@
+JA_USR"
+
+_runjob_testjob() {
+	local rc=0 hld
+	if hld="$(_read_option "JA_HLD" "${JA_JOB_DIR}job.attrs")"; then
+		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is held."
+		rc=1
+	fi
+
+	if hld="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")"; then
+		_usr_notify "Error: job queue '${jobq}' is held."
+		rc=1
+	fi
+	if hld="$(_read_option "JA_HLD" "${JA_SPOOL}${sbsd}.sbsd.attrs")"; then
+		_usr_notify "Error: subsystem '${sbsd}' is held."
+		rc=1
+	fi
+	if dummy="$(_read_option "JA_SBSD_STS" "${JA_SPOOL}${sbsd}.sbsd")"; then
+		_usr_notify "Error: subsystem '${sbsd}' is not active."
+		rc=1
+	fi
+	if [ "$(awk -v sbsd="${sbsd}" '$1 == sbsd {print $4; exit}' \
+	"${JA_CONF_SBSDS}")" != "0" ]; then
+		_usr_notify "Error: subsystem '${sbsd}' for job queue '${jobq}' \
+is not of interactive type."
+		rc=1
+	fi
+
+	return "${rc}"
+}
+
+_runjob_cmd() {
+	local fd1 sbsd_class cls_cgrp
+
+	( if ! flock --exclusive --timeout 1 ${fd1}; then
+		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+		return 1
+	fi
+
+		if ! _set_option "${attrs}" "JA_JOB_STS" "" || \
+		! _set_option "${attrs}" "JA_DATERLS" "$(date +%s)"; then
+			_usr_notify "Error: Not authorized to run job '${JA_JOB}.${JA_USR}'."
+			return 1
+		fi
+
+		sbsd_class="$(awk -v sbsd="${sbsd}" \
+			'$1 == sbsd {print $2; exit}' "${JA_CONF_SBSDS}")"
+		if [ -d /run/systemd/system ]; then
+			cls_cgrp="$(awk -v class="${sbsd_class}" \
+			'$1 == class {print $3; rc=-1; exit} END{exit rc+1}' \
+			"${JA_CONF_CLASS}")" || \
+				return 1
+		else
+			cls_cgrp="$(awk -v class="${sbsd_class}" \
+			'$1 == class {print $2; rc=-1; exit} END{exit rc+1}' \
+			"${JA_CONF_CLASS}")" || \
+				return 1
+		fi
+
+		# ignore sbsd_maxjobs
+
+		_set_option "${attrs}" "JA_JOB_TTY" ""
+		echo "${JA_CGEXEC_INTER}" | \
+			sed -e "\|@CGRP| s||${cls_cgrp}|g" \
+			-e "\|@JOB| s||${JA_JOB}|g" \
+			-e "\|@USR| s||${JA_USR}|g"
+
+	) {fd1}< "$(_flock_lckfile "${pidfile}")"
+}
+
+_runjob() {
+	local sts attrs pidfile
+	local jobq sbsd cgexec
+
+	attrs="${JA_JOB_DIR}job.attrs"
+	if ! _test_rw "${attrs}"; then
+		_usr_notify "Error: Not authorized to run job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+
+	jobq="$(_read_option "JA_JOBQ" "${attrs}")" || \
+		return 1
+	sbsd="$(awk -v jobq="${jobq}" '$1 == jobq {print $2; rc=-1; exit}' \
+		"${JA_CONF_JOBQS}")" || \
+		return 1
+
+	_runjob_testjob || \
+		return 1
+
+	pidfile="${JA_JOB_DIR}job.pid"
+	cgexec="$(_runjob_cmd)" || \
+		return 1
+
+	_usr_notify "Running job '${JA_JOB}.${JA_USR}'."
+	if [ -d "/run/systemd/system" ]; then
+		systemctl --user reset-failed "${JA_JOB}_${JA_USR}.service" || :
+		systemctl --user stop "${JA_JOB}_${JA_USR}.scope" || :
+	fi
+	${cgexec} || \
+		return 1
+} # runjob

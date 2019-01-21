@@ -1,0 +1,92 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# hold, release, stop, delete, ... selected jobs in a job queue
+
+_clrjobq_options="JA_JOBQ pr@
+JA_JOBACTION pr@
+JA_JOB_STSL pr@
+JA_USRL pr@
+JA_DAYSOLD pr"
+
+_clrjobq() {
+	local attrs dir job usr JA_CMD_CMD JA_CMD_ARGS
+	local found sts rc
+
+	JA_CMD_CMD="$(tr '[:upper:]' '[:lower:]' <<< "${JA_JOBACTION}")job"
+
+	found=""
+	unset attrs
+	while read attrs; do
+		[ -s "${attrs}" ] || \
+			continue
+		dir="$(dirname "${attrs}")"
+		job="$(basename "${dir}" ".job")"
+		usr="$(stat -c "%U" "${attrs}")"
+		_test_rw "${dir}" && \
+			_test_rw "${attrs}" || \
+			continue
+		[ "$(_read_option "JA_JOBQ" "${attrs}")" = "${JA_JOBQ}" ] || \
+			continue
+		if [ "${JA_JOB_STSL}" != "ALL" ]; then
+			sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
+				sts="JOBQ"
+			grep -qswe "${sts}" <<< "${JA_JOB_STSL}" || \
+				continue
+		fi
+		# don't delete jobs in status OUTQ/ERR or SAVED
+		if [ "${JA_CMD_CMD}" = "dltjob" ]; then
+			if [ "$(_read_option "JA_JOB_STS" "${attrs}")" = "OUTQ" ] && \
+			( ! rc="$(_read_option "JA_RC" "${attrs}")" || \
+			[ "${rc}" != "0" ] ); then
+				_usr_notify "Warning: job '${job}.${usr}' ended with error."
+				found="Warning"
+				continue
+			fi
+			if dummy="$(_read_option "JA_SAVED" "${attrs}")"; then
+				_usr_notify "Warning: job '${job}.${usr}' is saved."
+				found="Warning"
+				continue
+			fi
+		fi
+
+		[ -n "${found}" ] || \
+			found="Yes"
+		JA_CMD_ARGS=()
+		_options_reuse "${JA_CMD_CMD}" \
+			"JA_JOB=${job}" \
+			"JA_USR=${usr}"
+		_cmd_exec_background || \
+			found="Warning"
+
+		unset attrs
+	done < <(_find_jobs_files "${JA_USRL}" "job.attrs" "${JA_DAYSOLD}")
+
+	_usr_notify "Job queue '${JA_JOBQ}' cleared."
+} # clrjobq

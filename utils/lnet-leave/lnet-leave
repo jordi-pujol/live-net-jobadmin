@@ -1,0 +1,241 @@
+#!/bin/bash
+# A leave window for LXQt, LXDE and XFCE desktops
+# the pwrdwnsys command is from the jobadmin package
+
+# LXDE
+#vi ~/.config/lxpanel/LXDE/config
+#[Command]
+#Logout=lnet-leave
+# :wq
+
+# XFCE
+#cp /usr/share/applications/xfce4-session-logout.desktop ~/.local/share/applications/
+#vi ~/.local/share/applications/xfce4-session-logout.desktop
+#[Desktop Entry]
+#Exec=lnet-leave
+# :wq
+#xfdesktop --reload
+
+# LXQT
+# /usr/share/applications/lxqt-*.desktop
+# copy desktop files: lxqt-logout, lxqt-reboot, lxqt-suspend, lxqt-hibernate, lxqt-shutdown, 
+# to ~/.local/share/applications and replace command lxqt-leave to lnet-leave
+# Configure also "Shortcut Keys" in "Global actions manager"
+
+_help() {
+	>&2 printf '%s\n' "Usage:" \
+		"$(basename "${0}") help,${actions}"
+}
+
+_lxde_logout() {
+	local pid
+	if pid="$(ps h -C lxsession,x-session-manager -o pid,user | \
+	awk -v user="$(id -un)" '$2 == user {print $1; rc=-1; exit} \
+	END{exit rc+1}')"; then
+		kill "${pid}"
+	fi
+}
+
+_do_action() {
+	local action="$(echo "${1}" | tr '[A-Z]' '[a-z]')"
+
+	if ! echo "${actions}" | grep -qsiwe "${action}"; then
+		_help
+		return 1
+	fi
+
+	case "${action}" in
+		cancel) pwrdwnsys --option cancel ;;
+		hibernate|suspend|poweroff|reboot)
+			if test -n "${jobadmin}"; then
+				[ "${action}" = "suspend" -o "${action}" = "hibernate" ] && \
+					delay=0 || \
+					delay=10
+				pwrdwnsys --option CNTRLD --restart "${action}" --delay "${delay}"
+			elif test -n "${systemd}"; then
+				systemctl "${action}"
+			else
+				case "${action}" in
+					# maybe this will work only when /etc/sudo.conf is properly configured
+					poweroff) /sbin/poweroff ;;
+					halt) /sbin/shutdown -h now ;;
+					reboot) /sbin/shutdown -r now ;;
+					hibernate)
+						if [ -x "/usr/sbin/pm-hibernate" ]; then # pm
+							! pm-is-supported --hibernate || \
+								pm-hibernate
+						else
+							if grep -qswe disk /sys/power/state; then
+								echo platform > /sys/power/disk && \
+								echo disk > /sys/power/state || :
+							fi
+						fi
+						;;
+					suspend)
+						if [ -x "/usr/sbin/pm-hibernate" ]; then # pm
+							! pm-is-supported --suspend || \
+								pm-suspend
+						else
+							if grep -qswE "mem|standby|freeze" /sys/power/state; then
+								echo platform > /sys/power/disk && \
+									echo memory > /sys/power/state || :
+							elif grep -qswe mem /sys/power/state; then
+								echo platform > /sys/power/disk && \
+									echo mem > /sys/power/state || :
+							elif grep -qswe standby /sys/power/state; then
+								echo platform > /sys/power/disk && \
+									echo standby > /sys/power/state || :
+							elif grep -qswe freeze /sys/power/state; then
+								echo platform > /sys/power/disk && \
+									echo freeze > /sys/power/state || :
+							fi
+						fi
+						;;
+				esac
+				:
+			fi
+			;;
+		logout)
+			case "${XDG_CURRENT_DESKTOP:-}" in
+				LXQt) lxqt-leave --logout ;;
+				LXDE) _lxde_logout ;;
+				XFCE) xfce4-session-logout --logout ;;
+			esac
+			;;
+		lock)
+			case "${XDG_CURRENT_DESKTOP:-}" in
+				LXQt) lxqt-leave --lockscreen ;;
+				LXDE|XFCE) xdg-screensaver lock ;;
+			esac
+			;;
+		switch_user) dm-tool switch-to-user nobody ;;
+	esac
+	:
+}
+
+#exec >> /tmp/lnet-leave.txt 2>&1
+#set -x
+
+_ps_children() {
+	local ppid=${1:-${$}} excl="${2:-"0"}" pid
+	for pid in $(pgrep -P ${ppid} | grep -svwF "${excl}"); do
+		_ps_children ${pid} "${excl}"
+		echo ${pid}
+	done
+}
+
+_not_running() {
+	[ -z "$(pgrep -u "$(id -un)" "$(basename "$0")" | \
+	grep -svwF "${$} $(_ps_children)")" ] || \
+		return 1
+	:
+}
+
+_xmessage() {
+	local rc pid
+	local pidx wid
+	# local size x y width height
+	local title="Leave System-${$}"
+	xmessage -name "${title}" -center -print \
+		-buttons "${actions}" "Really shutdown?" &
+	pid="${!}"
+	pidx=""
+	if wid="$(xdotool search --sync --all --onlyvisible \
+	--name "${title}")"; then
+		# xwininfo -root -tree | grep $(printf '0x%x\n' $wid)
+		# xdotool getwindowname "${wid}"
+		# --class "xmessage"
+		xdotool behave "${wid}" blur windowactivate "${wid}" &
+		pidx="${!}"
+		# size="$(xdotool getwindowgeometry --shell "${wid}")"
+		# x="$(echo "${size}" | sed -nre '\|^X=(.*)$|{s||\1|p;q}')"
+		# y="$(echo "${size}" | sed -nre '\|^Y=(.*)$|{s||\1|p;q}')"
+		# width="$(echo "${size}" | sed -nre '\|^WIDTH=(.*)$|{s||\1|p;q}')"
+		# height="$(echo "${size}" | sed -nre '\|^HEIGHT=(.*)$|{s||\1|p;q}')"
+		# xdotool behave "${wid}" mouse-leave \
+		# 	windowsize "${wid}" "${width}" "${height}" \
+		# 	windowmove "${wid}" "${x}" "${y}" \
+		# 	behave "${wid}" mouse-enter \
+		# 	windowsize "${wid}" "${width}" "${height}" \
+		# 	windowmove "${wid}" "${x}" "${y}" &
+		# pidx="${pidx} ${!}"
+	fi >&2
+	wait "${pid}" && \
+		rc=0 || \
+		rc="${?}"
+	[ -z "${pidx}" ] || \
+		wait "${pidx}" || :
+
+	return "${rc}"
+}
+
+# lxqt-leave: --logout --lockscreen --suspend --hibernate --shutdown --reboot
+# lxsession-logout --banner "/usr/share/lxde/images/logout-banner.png" --side top
+# xfce4-session-logout: --logout --poweroff --reboot --suspend --hibernate
+# xdg-screensaver lock
+
+# MAIN process
+
+_not_running || \
+	exit 0
+
+# detect systemd
+systemd="$(! test -d "/run/systemd/system" || echo "y")"
+# TODO: systemd inhibit, it's not a TODO task when jobadmin is used
+#	systemd-inhibit --list --mode=block | \
+#		awk '$1 == "What:" && $2 ~ "shutdown|sleep|idle" {rc=-1; exit} END{exit rc+1}'
+
+# detect package jobadmin, pwrdwnsys command
+jobadmin="$(! test -n "$(which pwrdwnsys)" || echo "y")"
+
+# detect permission for power management
+powerdev="$(! id -Gn | grep -qswe powerdev || echo "y")"
+
+# configure available actions
+actions="Logout"
+if [ -n "${powerdev}" ]; then
+	# TODO:
+	actions="${actions},Poweroff,Reboot"
+	[ -z "${jobadmin}" ] || \
+		actions="${actions},Cancel"
+	# https://www.kernel.org/doc/Documentation/power/states.txt
+	! grep -qswe disk /sys/power/state || \
+		actions="Hibernate,${actions}"
+	! grep -qswE 'mem|standby|freeze' /sys/power/state || \
+		actions="Suspend,${actions}"
+fi
+case "${XDG_CURRENT_DESKTOP:-}" in
+	LXQt)
+		actions="Lock,${actions}"
+		;;
+	LXDE|XFCE)
+		! which xdg-screensaver > /dev/null || \
+			actions="Lock,${actions}"
+		;;
+esac
+# lightdm dm-tool
+[ -z "${XDG_SEAT_PATH:-}" ] || \
+	actions="Switch_User,${actions}"
+
+# check request or show input window
+if [ -n "${1:-}" ]; then
+	action="${1#*--}"
+	[ "${action}" != "shutdown" ] || \
+		action="poweroff"
+	[ "${action}" != "sleep" ] || \
+		action="suspend"
+	# execute command requested by parameter
+	rc=100
+else
+	action="$(_xmessage)" && \
+		rc=0 || \
+		rc="${?}"
+fi
+
+if [ ${rc} -gt 1 -a -n "${action}" ]; then
+	_do_action "${action}" && \
+		rc=0 || \
+		rc="${?}"
+fi
+
+exit ${rc}

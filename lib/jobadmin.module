@@ -1,0 +1,154 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+#
+
+. "${JA_LIB}libparms"
+
+_jobadmin_usage="JobAdmin Command Assistance
+
+jobadmin cmdname [cmd-options]
+
+- shows an assistance form for a jobadmin command.
+
+Examples:
+
+Request an assistance form to input parameter values
+for the command chgjob:
+
+jobadmin chgjob -j ls-XYZ -q pgmr"
+
+_jobadmin_options="JA_COMMAND rp"
+
+_jobadmin() {
+	local options M cmd_options options_getopt
+	local option optiontype varname rest
+	local attrs job_cmd m
+	local result
+	options=""
+	if _cmd_dsc "${JA_COMMAND}"; then
+		JA_COMMAND="${JA_CMD_CMD}"
+		if [ "${JA_COMMAND}" != "jobadmin" ]; then
+			JA_ASSIST_OBJ="${JA_CMD_OBJ}"
+			JA_ASSIST_NAME="${JA_CMD_NAME}"
+			options="$(_options_module "${JA_COMMAND}")"
+		fi
+	fi
+	if [ -z "${options}" ]; then
+		_usr_notify "Command '${JA_COMMAND}' is not available."
+		return 1
+	fi
+
+	M=""
+	cmd_options=""
+	options_getopt="$(_options_getopt "${options}" "${JA_COMMAND}" "${JA_NOEXTRAOPTIONS:-}")"
+
+	LNET_GETOPT_ALLVARS="Yes"
+	export LNET_GETOPT_ALLVARS
+	if ! result="$(tr -s '@' '\n' <<< "${options_getopt}" | \
+	getopt-sh "${@}")"; then
+		_usr_notify "$(_getopt_errors "${result}")" "" "y"
+	fi
+	result="$(tr -s ";" '\n' <<< "${result}")"
+
+	M0=""
+	attrs=""
+	job_cmd=""
+	if grep -qswe "${JA_COMMAND}" <<< "chgjob chgsplfa"; then
+		eval $(grep -se "^LNET_GETOPT_DEFAULTS=" <<< "${result}")
+		eval $(grep -se "^JA_JOB=" <<< "${result}")
+		case "${JA_COMMAND}" in
+		chgjob)
+			attrs="${JA_USR_DIR}${JA_JOB}.job/job.attrs"
+			job_cmd="${JA_USR_DIR}${JA_JOB}.job/job.cmd"
+			;;
+		chgsplfa)
+			[ -n "${JA_PID}" ] || \
+				JA_PID="$(_job_exist_exec "${JA_JOB}" "${JA_USR}")" || :
+			if [ -n "${JA_PID}" ]; then
+				eval $(grep -se "^JA_SPLF=" <<< "${result}")
+				attrs="${JA_USR_DIR}${JA_JOB}.job/job-${JA_PID}-${JA_SPLF}.splfa"
+			fi
+			;;
+		esac
+	fi
+	unset option optiontype varname rest
+	while read option optiontype varname rest; do
+		[ -n "${varname}" ] || \
+			continue
+		m=""
+		grep -qswe "${JA_COMMAND}" <<< "chgjob chgsplfa" && \
+		grep -qswe "${varname}" <<< "${LNET_GETOPT_DEFAULTS[@]}" || \
+			m="$(sed -nre '\|^'"${varname}"'=(.*)$| {s||\1|p}' <<< "${result}" | \
+			_trim_unquote)"
+		if [ -z "${m}" ] && \
+		grep -qswe "${JA_COMMAND}" <<< "chgjob chgsplfa" && \
+		[ -s "${attrs}" ]; then
+			case "${varname}" in
+			JA_JOB_CMD)
+				[ ! -s "${job_cmd}" ] || \
+					m="$(awk 'NR == 2 && $0 != "# jobadmin script" {
+					print "A custom script is detected."
+					exit}
+					NR == 3' "${job_cmd}")"
+				;;
+			*)
+				m="$(_read_option "${varname}" "${attrs}")" || \
+					! grep -qsE '[i]' <<< "${optiontype}" || \
+					m="No"
+				;;
+			esac
+		fi
+		M0="${M0}${m}"$'\n'
+		unset option optiontype varname rest
+	done < <(tr -s "@" '\n' <<< "${options_getopt}")
+
+	JA_FKEY_CONFIRM=""
+	JA_NOEXTRAOPTIONS=""
+	while :; do
+		result="$(_jobadmin_parms "${JA_COMMAND}")" || \
+			break
+		eval ${result}
+		if _cmd_dsc "${JA_COMMAND}"; then
+			JA_FKEY_ASSIST=""
+			if [ -z "${JA_FKEY_CONFIRM:-}" -a \
+			"${JA_CMD_TERMINAL}" -lt 1 ]; then
+				if _cmd_exec_background; then
+					sed -rne '\|[[:digit:]]{2} '"${JA_CMD_PID}"'] Command: |,$ p' < \
+						"${JA_USR_DIR}user.msgq" >&2
+					break
+				fi
+			else
+				_cmd_exec && break || :
+			fi
+		else
+			_usr_notify "Invalid Command: ${JA_COMMAND}" "" "y"
+		fi
+	done
+} # _jobadmin

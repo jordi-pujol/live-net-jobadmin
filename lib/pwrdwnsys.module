@@ -1,0 +1,164 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# power off
+
+_pwrdwnsys_usage="Power Down System
+
+pwrdwnsys -o|--option immed -d|--delay 30 -r|--restart hibernate
+
+- enable or disable a controlled system poweroff
+
+		-o|--option 'IMMED|ASAP|CNTRLD|CANCEL|STATUS' : when to shutdown the system:
+		IMMED - immediately
+		ASAP - when finish all jobs that are running.
+				No other pending jobs will be started
+		CNTRLD - when all pending jobs are finished
+		CANCEL - cancel a pwrdwnsys previous request
+		STATUS - show actual pwrdwnsys status
+-d|--delay '30' : seconds waiting for new pending jobs or some user action.
+-r|--restart 'POWEROFF|HALT|REBOOT|SUSPEND|HIBERNATE' : method used to shutdown/restart
+-b|--rlssbs 'Yes|No' : when cancelling we'll release subsystems previously held by ASAP
+-x|--xsaver 'Yes|No' : wait when X screen saver is active
+
+-h|--help  : help"
+
+_pwrdwnsys_options="JA_OPTION pr@
+JA_RESTART pr@
+JA_DELAY r@
+JA_RLSSBS r@
+JA_XSAVER r"
+
+_pwrdwnsys() {
+	local pwr_delay pwr_option pwr_pid pwr_restart sbsd sbsds attrs l
+
+	attrs="${JA_TMP}pwrdwnsys.attrs"
+	# permission to access that file is not correctly checked
+	# until the program executes this command
+	getfacl "${attrs}" > /dev/null 2>&1 || return 1
+
+	if ! test -r "${attrs}"; then
+		_usr_notify "Error: Not authorized to read pwrdwnsys status."
+		return 1
+	fi
+	if [ "${JA_OPTION}" = "STATUS" ]; then
+		if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
+			pwr_option="$(_read_option "JA_OPTION" "${attrs}")" || :
+			pwr_restart="$(_read_option "JA_RESTART" "${attrs}")" || :
+			pwr_delay="$(_read_option "JA_DELAY" "${attrs}")" || \
+				pwr_delay=0
+			pwr_pid="$(_read_option "JA_PID" "${attrs}")" || :
+			_usr_notify "Power down system option '${pwr_option}' is \
+'$(test -n "${pwr_pid}" && printf '%s' "active-${pwr_pid}" || printf '%s' "enabled")' \
+for ${pwr_restart}\
+$(test ${pwr_delay} -eq 0 || echo ", ${pwr_delay} seconds delayed")."
+			! sbsds="$(_read_option "JA_SBSD" "${attrs}")" || 
+				_usr_notify "Power down system: subsystems ${sbsds} have been held."
+		else
+			_usr_notify "Power down system is not enabled."
+		fi
+		[ ! -s "${JA_TMP}jobs_active.lst" ] || \
+			cat "${JA_TMP}jobs_active.lst"
+#		if [ -d "/run/systemd/system" ]; then
+#			while read l; do
+#				[ -z "${l}" ] || _usr_notify "${l}"
+#			done < <(systemd-inhibit --mode=block --list | \
+#awk '! $1 {l=""}
+#$1 == "Who:" {l=$0}
+#$1 == "What:" && $2 ~ "shutdown|sleep|idle" {if (l) {print l}}')
+#		fi
+		return 0
+	fi
+	if ! _test_rw "${attrs}"; then
+		_usr_notify "Error: Not authorized to stop the system."
+		return 1
+	fi
+	if [ "${JA_OPTION}" = "CANCEL" ]; then
+		if [ "${JA_RLSSBS}" = "Yes" ]; then
+			sbsds=""
+			for sbsd in $(awk '$4 != "1" {print $1}' \
+			"${JA_CONF_SBSDS}"); do
+				if [ "$(_read_option "JA_HLD" "${JA_SPOOL}${sbsd}.sbsd.attrs")" = "HLDPWR" ]; then
+					sbsds="${sbsds}${sbsds:+" "}${sbsd}"
+					_set_option "${JA_SPOOL}${sbsd}.sbsd.attrs" "JA_HLD" "" || :
+				fi
+			done
+			[ -z "${sbsds}" ] || \
+				if _pipe_write "_jobadmin"; then
+					_usr_notify "Releasing subsystems: '${sbsds}'."
+				fi
+			_set_option "${attrs}" "JA_SBSD" ""
+		fi
+		if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
+			msg="Cancelling system shutdown."
+			_usr_notify "${msg}"
+			_pipe_write "_msg_allusrs:${JA_USR}:${msg}"
+			truncate -s 0 "${JA_TMP}pwrdwnsys.now"
+			_set_option "${attrs}" "JA_USR" "${JA_USRACT}"
+			_set_option "${attrs}" "JA_OPTION" "${JA_OPTION}"
+			return 0
+		fi
+		_usr_notify "Warning: Power down system is not active."
+		return 0
+	fi
+	if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
+		_usr_notify "Error: Power down system is active now, please cancel it before changing options."
+		return 1
+	fi
+	truncate -s 0 "${attrs}"
+	_set_option "${attrs}" "JA_USR" "${JA_USRACT}"
+	_set_option "${attrs}" "JA_OPTION" "${JA_OPTION}"
+	_set_option "${attrs}" "JA_DELAY" "${JA_DELAY}"
+	_set_option "${attrs}" "JA_RESTART" "${JA_RESTART}"
+	[ "${JA_XSAVER}" = "Yes" ] || JA_XSAVER=""
+	[ "${JA_OPTION}" != "IMMED" ] || JA_XSAVER=""
+	_set_option "${attrs}" "JA_XSAVER" "${JA_XSAVER}"
+
+	sbsds=""
+	if [ "${JA_OPTION}" = "ASAP" ]; then
+		for sbsd in $(awk '$4 != "1" {print $1}' \
+		"${JA_CONF_SBSDS}"); do
+			if ! dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${sbsd}.sbsd.attrs")" && \
+			! dummy="$(_read_option "JA_SBSD_STS" "${JA_SPOOL}${sbsd}.sbsd")"; then
+				sbsds="${sbsds}${sbsds:+" "}${sbsd}"
+				_set_option "${JA_SPOOL}${sbsd}.sbsd.attrs" "JA_HLD" "HLDPWR" || :
+			fi
+		done
+	fi
+	_set_option "${attrs}" "JA_SBSD" "${sbsds}"
+	[ -z "${sbsds}" ] || \
+		_usr_notify "Power down system has held subsystems '${sbsds}'."
+
+	printf '%s\n' "${JA_OPTION}" > "${JA_TMP}pwrdwnsys.now"
+
+	if _pipe_write "_jobadmin"; then
+		_usr_notify "Power down system ${JA_OPTION} for ${JA_RESTART}\
+$(test ${JA_DELAY} -eq 0 || echo ", ${JA_DELAY} seconds delayed")."
+	fi
+} # pwrdwnsys

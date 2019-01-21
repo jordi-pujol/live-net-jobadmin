@@ -1,0 +1,84 @@
+#!/bin/bash
+# package: jobadmin
+# file:    /etc/default/jobadmind
+
+if [ -z "${JA_TMP:+"${JA_TMP}"}" ]; then
+# directories, slash terminated
+JA_TMP="/var/tmp/jobadmin.d/"
+JA_SPOOL="/var/spool/jobadmin.d/"
+JA_PIDS="/run/jobadmin.d/"
+JA_LIB="/usr/lib/jobadmin/"
+JA_CONF_DIR="/etc/jobadmin.d/"
+
+# configuration files
+JA_CONF="${JA_CONF_DIR}jobadmin"
+JA_CONF_CMDS="${JA_TMP}cmds.conf"
+JA_CONF_FKEYS="${JA_TMP}fkeys.conf"
+JA_CONF_JOBDS="${JA_TMP}jobds.conf"
+JA_CONF_JOBQS="${JA_TMP}jobqs.conf"
+JA_CONF_OUTQS="${JA_TMP}outqs.conf"
+JA_CONF_PARMS="${JA_TMP}parms.conf"
+JA_CONF_PARMVALS="${JA_TMP}parmvals.conf"
+JA_CONF_PARMDFTS="${JA_TMP}parmdfts.conf"
+JA_CONF_SBSDS="${JA_TMP}sbsds.conf"
+JA_CONF_CLASS="${JA_TMP}class.conf"
+JA_CONF_USRS="${JA_TMP}usrs.conf"
+JA_CONF_WTRS="${JA_TMP}rwtrs.conf"
+JA_CONF_DLG="${JA_TMP}dialogrc.conf"
+JA_CONF_DLG_F4="${JA_TMP}dialogrc-f4.conf"
+
+# daemon files
+JA_DAEMON="/usr/sbin/jobadmind"
+JA_PIDFILE="/run/jobadmind.pid"
+JA_PIPE="${JA_PIDS}jobadmin.pipe"
+JA_PIPE_WTR="${JA_PIDS}jobadmin-wtr.pipe"
+JA_PIPE_DAEMON="${JA_PIDS}jobadmin-daemon.pipe"
+JA_LOG="/var/log/jobadmind"
+
+# process spool files
+#JA_PROCESS_WTR="yes"
+JA_PROCESS_WTR=""
+
+# user index files for pending jobs and pending spool files
+JA_USR_SCDJOBS="jobs.scd"
+JA_USR_SCDSPLFS="splfs.scd"
+
+# the daemon is event driven,
+# all commands and events are processed immediatelly;
+JA_INTERVAL=600
+readonly JA_INTERVAL
+
+# when the percent of idle cpu is greater or equal than JA_CPU_IDLE
+# jobadmin will consider that the system is idle
+# and pwrdwnsys will be activated.
+# only integer values are allowed
+# Actually it does not work, because
+# the processors are so powerful that some processes consume less than 1% of cpu
+# valid values 0 to 100, 0 to disable check
+JA_CPU_IDLE=0
+
+#JA_DISABLED="yes"
+
+readonly JA_TMP JA_SPOOL JA_PIDS JA_LIB
+# JA_CONF may be modified
+readonly JA_CONF_PARMDFTS JA_CONF_CMDS JA_CONF_FKEYS JA_CONF_JOBDS JA_CONF_JOBQS JA_CONF_OUTQS JA_CONF_SBSDS JA_CONF_USRS JA_CONF_WTRS JA_CONF_DLG
+readonly JA_PIDFILE JA_PIPE JA_LOG
+readonly JA_DISABLED
+readonly JA_CPU_IDLE
+
+# some options for LNET_GETOPT
+LNET_GETOPT_SHOWCMD="y"
+LNET_GETOPT_UNSET="clear"
+unset LNET_GETOPT_ALLPOS LNET_GETOPT_ALLREQ
+export LNET_GETOPT_UNSET LNET_GETOPT_ALLPOS LNET_GETOPT_ALLREQ \
+	LNET_GETOPT_SHOWCMD
+readonly LNET_GETOPT_UNSET LNET_GETOPT_ALLPOS LNET_GETOPT_ALLREQ \
+	LNET_GETOPT_SHOWCMD
+
+# notify-send:
+# message timeout in milliseconds, 0 means no timeout
+JA_NOTIFY_TIMEOUT=20000
+export JA_NOTIFY_TIMEOUT
+readonly JA_NOTIFY_TIMEOUT
+
+fi

@@ -1,0 +1,20 @@
+# Get Attributes of a Printing Job
+# ipptool -t ipp://localhost:631/jobs/2 get-job-attributes
+
+{
+	# The name of the test...
+	NAME "Get job info with get-job-attributes"
+
+	# The operation to use
+	OPERATION get-job-attributes
+
+	# Attributes, starting in the operation group...
+	GROUP operation
+	ATTR charset attributes-charset utf-8
+	ATTR language attributes-natural-language en
+	ATTR uri job-uri $uri
+
+	# What statuses are OK?
+	STATUS successful-ok
+    DISPLAY job-state
+}

@@ -1,0 +1,85 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# lists jobs for a job queue
+
+_dspjobq_usage="Display Job Queue
+
+dspjobq -q|--jobq 'JOBQ'
+
+- lists jobs for a job queue"
+
+_dspjobq_options="JA_JOBQ rp"
+
+_dspjobq() {
+	local jobq job usr sts attrs fd1 hld
+
+	jobq="${JA_SPOOL}${JA_JOBQ}.jobq"
+
+	if ! test -r "${jobq}"; then
+		_usr_notify "Error: Not authorized to manage job queue '${JA_JOBQ}'."
+		return 1
+	fi
+
+	( printf '%s\n' "Job queue '${JA_JOBQ}':"
+	( if ! flock --shared --nonblock ${fd1}; then
+		_usr_notify "Error: job queue '${JA_JOBQ}' is locked."
+		return 1
+	fi
+	
+	if hld="$(_read_option "JA_HLD" "${JA_SPOOL}${JA_JOBQ}.jobq.attrs")"; then
+		printf 'Status: %s\n' "'${hld}'"
+	else
+		printf 'Status: %s\n' "'RLS'"
+	fi
+	printf '\n'
+	# search on job's directories
+	# print name of jobs in this job queue and their status.
+	printf 'Jobs in job queue:\n'
+	unset attrs
+	while read attrs; do
+		[ -s "${attrs}" ] || continue
+		job="$(basename "$(dirname "${attrs}")" ".job")"
+		usr="$(stat -c "%U" "${attrs}")'"
+		if test -r "${attrs}"; then
+			if [ "$(_read_option "JA_JOBQ" "${attrs}")" = "${JA_JOBQ}" ]; then
+				sts="$(_read_option "JA_JOB_STS" "${attrs}")" || sts="JOBQ"
+				printf 'job %s%s, status %s\n' \
+					"'${job}." \
+					"${usr}'" \
+					"'${sts}'"
+			fi
+		else
+			_usr_notify "Error: Not authorized to manage job '${job}.${usr}'."
+		fi
+		unset attrs
+	done < <(_find_job_files "job.attrs" "")
+	) {fd1}< "$(_flock_lckfile "${jobq}")"
+	) 2>&1 | pager
+} # dspjobq

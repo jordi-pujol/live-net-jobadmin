@@ -1,0 +1,82 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# connect to the screen of a job
+
+_dspjobscr_usage="Display Job Screen
+
+dspjobscr -j|--job 'JOBNAME' [ -e|--pid 'JOBPID' ]
+
+- connect to the screen of a job"
+
+_dspjobscr_options="JA_JOB pr@
+JA_USR@
+JA_PID"
+
+_dspjobscr() {
+	local screen_list sts # found
+	local JA_SCR_PID JA_SCR_JOB JA_SCR_STS rest fd1
+
+	# test if a job exists for JA_JOB JA_PID JA_USR
+	[ -n "${JA_PID}" ] || \
+		JA_PID="$(_job_exist_exec)" || \
+			return 1
+	sts="$(_read_option "JA_JOB_STS" "${JA_JOB_DIR}job.attrs")" || \
+		sts="JOBQ"
+	# from the screens available, find one and connect to.
+	ppid="${JA_PID}"
+	while [ "${ppid}" -gt 1 ] && \
+	! ps --no-headers -o cmd "${ppid}" | grep -qsie "$(which screen)"; do
+		! ppid="$(_pid_parent "${ppid}")" || \
+			continue
+		_usr_notify "Can't connect to job '${JA_JOB}.${JA_USR}.${JA_PID}', status '${sts}'."
+		return 1
+	done
+	if job="$(_screen_list | \
+	awk -v job="${JA_JOB}" -v ppid="${ppid}" \
+'$1 == ppid && $2 == job { print ; rc = -1; exit }
+END {exit rc+1}')"; then
+		read JA_SCR_PID JA_SCR_JOB JA_SCR_STS rest <<< "${job}"
+		( if ! flock --shared --nonblock ${fd1}; then
+			_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+			return 1
+		else
+			_usr_notify "Connecting to job '${JA_JOB}.${JA_USR}.${JA_PID}'."
+			# attach to a running session 	screen -x <name> without detaching the others
+			# attach to session with name 	screen -r <name> that is detached
+			# attach to a running session 	screen -dRR <name> detaching the other displays
+			_sudo "${JA_USR}" \
+			screen -x "${JA_SCR_PID}.${JA_JOB}"
+		fi
+		) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+	else
+		_usr_notify "Can't connect to job '${JA_JOB}.${JA_USR}.${JA_PID}', status '${sts}'."
+		return 1
+	fi
+} # dspjobscr

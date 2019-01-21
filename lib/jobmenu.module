@@ -1,0 +1,139 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+#
+
+. "${JA_LIB}libparms"
+
+_jobmenu_usage="JobAdmin Menu
+
+jobmenu object-type cmdname
+
+- shows an introduction form for jobadmin commands
+and lets the user choose."
+
+_jobmenu_options="JA_OBJ pr@
+JA_COMMAND p"
+
+_jobmenu_refresh() {
+	# global JA_OBJ all_cmds all_cmds_count
+
+	all_cmds="$(awk '$2 ~ "^[[:upper:],]+$" {printf $1 OFS $2 OFS
+for (i=8;i<=NF;i++) printf $i OFS
+printf ORS}' "${JA_CONF_CMDS}" | \
+		sort -k 2,2 -k 1,1)"
+
+	all_cmds="$(awk -v obj="${JA_OBJ}" \
+'BEGIN{if (obj != "ALL") {
+	split(obj, a, ",")
+	for (v in a) g[a[v]]
+	}
+}
+$2 ~ /^[[:upper:],]+$/ {
+	split($2, b, ",")
+	for (v in b) {
+		if (obj == "ALL" || b[v] in g) {
+			printf $1 OFS b[v] OFS
+			for (i=8;i<=NF;i++) printf $i OFS
+			printf ORS
+			break
+		}
+	}
+}' "${JA_CONF_CMDS}" | sort -k 2,2 -k 1,1)"
+
+	all_cmds_count="$(wc -l <<< "${all_cmds}")"
+}
+
+_jobmenu() {
+	local a DIALOG all_cmds rc cmd type desc
+
+	# list the jobs
+	JA_DIALOG_COMMANDS="Select a command."
+	_jobmenu_refresh
+	rc=0
+	while :; do
+		_dialog_init
+		# last-key doesn't work
+		# --help-button --help-status \
+		# --last-key
+		DIALOG="dialog --output-fd 7 --stdout --no-shadow \
+--colors \
+--begin ${JA_DIALOG_HEIGHT} 0 \
+--title Messages --tailboxbg ${JA_DIALOG_TAILBOXMSG} \
+$((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
+--and-widget \
+--help-button --help-status \
+--extra-button --extra-label Parms \
+--default-item '${JA_COMMAND}' \
+--clear --title '${JA_MODULE_NAME}' \
+--colors \
+--begin 0 $(((${JA_DIALOG_SCREEN_WIDTH}-51)/2)) \
+--menu '${JA_DIALOG_COMMANDS}' ${JA_DIALOG_HEIGHT} \
+51 $((${JA_DIALOG_HEIGHT}-4)) \
+$(while read cmd type desc; do
+	printf "'%s' '%s' " "${cmd}" "${desc}"
+done <<< "${all_cmds}"
+)"
+		cmd="$(eval "${DIALOG}")" && \
+			rc=0 || rc="${?}"
+		case "${rc}" in
+		0) # OK
+			if [ -n "${cmd}" ]; then
+				export JA_FKEY_ASSIST="Yes"
+				if _cmd_dsc "${cmd}"; then
+					JA_CMD_ARGS=()
+					_cmd_exec || :
+				else
+					_usr_notify "Invalid command '${cmd_options}'" "" "y"
+				fi
+			fi
+			;;
+		2) # Help depending on selected option
+			cmd="$(awk '{print $2}' <<< "${cmd}")"
+			_usr_notify "$(_usage "${cmd}" 2>&1)" "" "y"
+			;;
+		3) # Extra-button
+			_jobadmin_parms_vars
+			;;
+		4) # NO Item-Help
+			_usr_notify "$(_usage 2>&1)" "" "y"
+			;;
+		1|255) # 1=Cancel 255=Esc
+			rc=0
+			break
+			;;
+		*)
+			_usr_notify "error ${rc} in dialog." "" "y"
+			break
+			;;
+		esac
+	done
+	_dialog_end
+	return "${rc}"
+} # _jobmenu

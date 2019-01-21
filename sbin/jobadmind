@@ -1,0 +1,1994 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+#
+# Traps (daemon mode):
+# signal HUP (1) read config file again
+# signal TERM (15) exit
+
+if [ ! -s "/etc/default/jobadmind" ]; then
+	printf '%s\n' "Error: Default file '/etc/default/jobadmind' not found." >&2
+	exit 1
+fi
+
+. "/etc/default/jobadmind"
+. "${JA_LIB}libjobadmin"
+
+# icon files
+JA_ICON_INFO="$(_expand_glob "/usr/share/icons/*/16x16/status/*info*" | \
+sort | head -1)"
+JA_ICON_WARNING="$(_expand_glob "/usr/share/icons/*/16x16/status/*warning*" | \
+sort | head -1)"
+
+usage="${0}
+Options:
+
+-d = daemon mode
+-l = log to syslog
+-v = verbose comments
+
+Examples:
+
+Daemon mode:
+
+${0} -d"
+
+# log
+_log() {
+	local msg="${@}"
+	printf '%s %s\n' "$(date --rfc-3339=seconds | cut -f 1 -d '+')" \
+		"${msg}" >> "${JA_LOG}"
+}
+
+_jobadmin_usr_notify() {
+	local usr="${1}" msg="${2}"
+	_usr_notify "${msg}" "${usr}"
+	:
+}
+
+_jobadmin_allusrs_msg() {
+	local usr msg="${@}"
+	for usr in $(_system_users); do
+		_usr_notify "${msg}" "${usr}"
+	done
+	:
+}
+
+_test_usr_dir() {
+	local usr
+	local usr_dir perm usr_link
+
+	for usr in "${@}"; do
+		if ! usr_dir="$(_usr_dir "${usr}")"; then
+			_log "Error: Invalid user '${usr}' in function '_test_usr_dir'."
+			continue
+		fi
+		if [ ! -d "${usr_dir}" ]; then
+			_sudo "${usr}" mkdir -p "${usr_dir}"
+			[ "${usr}" != "root" ] || \
+				chown root:root "${usr_dir}"
+		fi
+		! getfacl "${usr_dir}" 2> /dev/null | grep -qxse '# group: adm' || \
+			_log "Error: Group 'adm' can't be main group of directory" \
+				"'${usr_dir}' for user: '${usr}'."
+		id -Gn "${usr}" | grep -qswe 'root' && \
+			perm="${JA_PERM_ROOT}" || \
+			perm="rwx"
+		if ! getfacl "${usr_dir}" 2> /dev/null | \
+		grep -qse '^default:group:adm:'; then
+			setfacl --remove-all --recursive "${usr_dir}" || \
+			_log "Error: Can't remove ACL's in device '$(df "${usr_dir}" | \
+				awk 'NR == 2 {print $1}')'."
+			setfacl --recursive --default --modify "group:adm:${perm}" "${usr_dir}" || \
+			_log "Error: Can't set ACL's in device" \
+				"'$(df "${usr_dir}" | awk 'NR == 2 {print $1}')'."
+			setfacl --recursive --modify "group:adm:${perm}" "${usr_dir}" || \
+			_log "Error: Can't set ACL's in device" \
+				"'$(df "${usr_dir}" | awk 'NR == 2 {print $1}')'."
+		fi
+		usr_link="${JA_SPOOL}${usr}.usr"
+		if [ ! -L "${usr_link}" ]; then
+			[ ! -e "${usr_link}" ] || \
+				mv -f "${usr_link}" \
+					"$(mktemp --dry-run "${usr_link}-XXX")"
+			ln -s "${usr_dir}" "${usr_link}"
+			( set +o noglob
+			( ls -L1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \
+			tr -s '\n' '\000' | \
+			xargs -r0 basename -s '.usr' ) | \
+			sort | \
+			_comma_separated > "${JA_TMP}users.lst"
+		fi
+	done
+	:
+}
+
+_create_usr_dir() {
+	local usr="${1}"
+
+	if _usr_id "${usr}"; then
+		_test_usr_dir "${JA_USR_USR}"
+		_pipe_daemon_write "_jobadmin" &
+	else
+		_log "Error: Invalid user: '${usr}' in function '_create_usr_dir'."
+	fi
+}
+
+_enable_daemon_debug() {
+	bash_xtracefd=2
+	JA_DEBUG="${JA_DEBUG_DAEMON:-}"
+	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
+	if [ -n "${JA_DEBUG:-}" ]; then
+		exec {bash_xtracefd}>> "${JA_LOG}.xtrace"
+		BASH_XTRACEFD=${bash_xtracefd}
+		set -x
+	fi
+	:
+}
+
+_text_date() {
+	echo "[$(date --rfc-3339=seconds | cut -f 1 -d '+')]"
+}
+
+_jobadmin_notify_send() {
+	local pid_sess
+	if [ -n "${leader}" ]; then
+		pid_sess="$(ps --no-headers --ppid "${leader}" -o pid)"
+		pid_sess="${pid_sess// /}"
+		[ -n "${pid_sess}" ] || \
+			return 0
+	else
+		local session_managers=( x-session-manager $(basename -s '' \
+			$(update-alternatives --list x-session-manager)) )
+		IFS="|" session_managers="${session_managers[*]}"
+		pid_sess="$(ps --no-headers \
+		-u "${usr}" -o pid,cmd | \
+		awk -v sm="${session_managers}" \
+		'$2 ~ sm {print $1; rc=-1; exit}
+		END{exit rc+1}')" || \
+			return 0
+	fi
+	local DBUS_SESSION_BUS_ADDRESS
+	DBUS_SESSION_BUS_ADDRESS="$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/${pid_sess}/environ | \
+		tr -d '\0')" || return 0
+	local DISPLAY
+	export DISPLAY="${1}"
+	export "${DBUS_SESSION_BUS_ADDRESS}"
+	_sudo "${usr}" \
+		notify-send ${notifyID:+"-r"} ${notifyID} -u "${urgency}" \
+		${icon:+"-i"} ${icon} -t "${timeout}" -a "Jobadmin" \
+		"$(_text_date)" "${msg}"
+}
+
+_jobadmin_msg_usr() {
+	# global language
+	local usr msg urgency reuse_ID notifyID \
+		timeout pid terminal terminals active leader \
+		icon
+
+	usr="${1}"
+	msg="${2}"
+	# Specifies the urgency level (low, normal, critical) and timeout
+	timeout="$(cut -f 2 -s -d ':' <<< "${3}")"
+	urgency="$(cut -f 1 -d ':' <<< "${3}")"
+	reuse_ID="${4:-}"
+	notifyID="${5:-}"
+
+	if grep -qsExe "[[:alpha:]]+|0" <<< "${notifyID}"; then
+		printf "%s\n" "${notifyID}"
+		return 0
+	fi
+
+	icon="${JA_ICON_INFO}"
+	case "${urgency:="normal"}" in
+	critical)
+		timeout="${timeout:-"0"}"
+		icon="${JA_ICON_WARNING}"
+		;;
+	low)
+		timeout="${timeout:-"2000"}"
+		;;
+	esac
+	timeout="${timeout:-"${JA_NOTIFY_TIMEOUT}"}"
+	[ -n "${notifyID}" ] || \
+		_usr_notify "${msg}" "${usr}" "y"
+	terminals=()
+	if [ -d "/run/systemd/system" ]; then
+		while read -r session uid usr1 seat; do
+			[ "${usr}" = "${usr1}" ] || \
+				continue
+			active=""
+			terminal=""
+			leader=""
+			while IFS='=' read p v; do
+				case "${p}" in
+				Active) active="${v}" ;;
+				Display) terminal="${v}" ;;
+				Leader) leader="${v}" ;;
+				esac
+			done < <(loginctl show-session --no-pager --no-legend \
+				-p Display -p Active -p Leader "${session}")
+			[ "${active}" = "yes" ] || \
+				continue
+			if [ -n "${terminal}" ]; then
+				notifyID="$(_jobadmin_notify_send "${terminal}")"
+				[ -z "${reuse_ID}" ] || \
+					[ "${#terminals[@]}" -ne 0 ] || \
+					[ -z "${notifyID}" ] || \
+					printf "%u\n" "${notifyID}"
+				terminals+=( "${terminal}" )
+			else
+				: # TODO: identify console device and the console user
+				# then print a message according to dmesg preferences
+			fi
+		done < <(loginctl list-sessions --no-pager --no-legend)
+	else
+		if read display terminal; then
+			if [ "${display}" = "-" ]; then
+				: # TODO: identify console device and the console user
+				# then print a message according to dmesg preferences
+			else
+				leader=""
+				notifyID="$(_jobadmin_notify_send "${display}")"
+				[ -z "${reuse_ID}" ] || \
+					[ "${#terminals[@]}" -ne 0 ] || \
+					[ -z "${notifyID}" ] || \
+					printf "%u\n" "${notifyID}"
+				terminals+=( "${terminal}" )
+			fi
+		fi < <(w -hs "${usr}" | \
+		awk -v tty="$(cat /sys/class/tty/tty0/active)" \
+		'$2 == tty {print $2 FS $3; rc=-1; exit}
+		END{exit rc+1}')
+	fi
+	# force writing a message to the terminal
+	if [ -n "${JA_MSG_XTERM:-""}" ] || \
+	[ "${#terminals[@]}" -eq 0 ]; then
+		for terminal in $(find /dev/pts -type c -name '[[:digit:]+]'); do
+			# check user is owner
+			# and group has write rights -> mesg is enabled on terminal
+			[ "$(stat -c %U "${terminal}")" = "${usr}" ] && \
+			[ $(( "0$(stat -c %a "${terminal}")" & "0020" )) -gt 0 ] || \
+				continue
+			printf '%s\n' "$(_text_date) ${msg}" > "${terminal}" || :
+			[ -z "${reuse_ID}" ] || \
+				[ "${#terminals[@]}" -ne 0 ] || \
+				printf "%u\n" "0"
+			terminals+=( "${terminal}" )
+		done
+	fi
+	[ -z "${reuse_ID}" ] || \
+		[ "${#terminals[@]}" -ne 0 ] || \
+		printf "%s\n" "NOTLOGGEDIN"
+	:
+}
+
+_jobadmin_msg_usrs() {
+	local usrs="${1}" msg="${2}" urgency="${3:-}"
+	local usr
+	for usr in ${usrs}; do
+		_jobadmin_msg_usr "${usr}" "${msg}" "${urgency}" &
+	done
+}
+
+_jobadmin_msg_job() {
+	local job usr1 usr job_pid message urgency
+	local msg language display attrs
+	job="${1}"
+	usr="${2}"
+	job_pid="${3}"
+	message="${4}"
+	urgency="${5:-}"
+
+	attrs="$(_usr_dir "${usr}")${job}.job/job.attrs"
+	msg="Job '${job}.${usr}.${job_pid}' ${message}."
+	language="$(_read_option "JA_JOB_LANGUAGE" "${attrs}")" || \
+		language="en_US"
+	_log "${msg}"
+	_jobadmin_msg_usrs "${usr} $(_read_option "JA_SUDO_USR" "${attrs}")" \
+		"${msg}" "${urgency}"
+	:
+}
+
+_reload_description() {
+	local objtype="${1}" objname="${2}"
+
+	printf '%s\n' "g/^${objname}\b/d" 'w' | \
+		ed -s "${JA_TMP}${objtype}.conf" 2> /dev/null || \
+		[ -z "${JA_DEBUG}" ] || \
+		eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+	awk -v objname="${objname}" \
+		'$1 == objname {$1=$1; print; exit}' \
+		"${JA_CONF_DIR}${objtype}.conf" >> \
+		"${JA_TMP}${objtype}.conf"
+	:
+}
+
+_jobadmin_strsbs() {
+	local sbsd="${1}"
+	local usr="${2}"
+	local hld
+	local jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	local sbsd1 sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+
+	if [ ! -s "${JA_SPOOL}${sbsd}.sbsd" ]; then
+		_jobadmin_msg_usrs "${usr}" \
+			"Error strsbs: Subsystem ${sbsd} does not exist." \
+			"critical"
+		_log "Error strsbs: Subsystem ${sbsd} does not exist."
+		return 0
+	fi
+
+	hld="$(cat "${JA_SPOOL}${sbsd}.sbsd.attrs")"
+	if ! _read_option "JA_SBSD_STS" "${JA_SPOOL}${sbsd}.sbsd" > /dev/null 2>&1; then
+		_jobadmin_msg_usrs "${usr}" \
+			"Error strsbs: ${hld:+"Held "}subsystem '${sbsd}' is already active." \
+			"critical"
+		_log "Error strsbs: ${hld:+"Held "}subsystem '${sbsd}' is already active."
+		return 0
+	fi
+
+	_reload_description "sbsds" "${sbsd}"
+	# related jobqs
+	for jobq in $(awk -v sbsd="${sbsd}" '$2 == sbsd {print $1}' \
+	"${JA_CONF_JOBQS}"); do
+		printf '%s\n' "g/^${jobq}\b/d" 'w' | \
+			ed -s "${JA_CONF_JOBQS}" 2> /dev/null || \
+			[ -z "${JA_DEBUG}" ] || \
+			eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+	done
+	unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	while read -r jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror; do
+		_reload_description "jobqs" "${jobq}"
+		_jobadmind_manage_perms "${jobq_perms}" "${jobq}.jobq" "${jobq}.jobq.attrs"
+		unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	done < <(awk -v sbsd="${sbsd}" '$2 == sbsd' "${JA_CONF_DIR}jobqs.conf")
+	unset sbsd1 sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	while read -r sbsd1 sbsd_class sbsd_maxjobs sbs_typ sbsd_perms; do
+		_jobadmind_manage_perms "${sbsd_perms}" "${sbsd1}.sbsd" "${sbsd1}.sbsd.attrs"
+		unset sbsd1 sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	done < <(awk -v sbsd="${sbsd}" '$1 == sbsd' "${JA_CONF_SBSDS}")
+
+	if _set_option "${JA_SPOOL}${sbsd}.sbsd" "JA_SBSD_STS" ""; then
+		_jobadmin_msg_usrs "${usr}" \
+			"Starting ${hld:+"a held "}subsystem '${sbsd}'."
+		_pipe_write "_jobadmin" &
+	else
+		_jobadmin_msg_usrs "${usr}" \
+			"Error strsbs: Can't start subsystem '${sbsd}'."
+	fi
+	:
+} # strsbs
+
+_jobadmin_waitflock() {
+	local job usr job_pid
+	local job_dir usr_dir attrs sts attrs_exec
+	local rc jobq jobq_onerror fd1
+
+	_enable_daemon_debug
+
+	job="$(cut -f 1 -s -d '.' <<< "${1}")"
+	usr="$(cut -f 2 -s -d '.' <<< "${1}")"
+	job_pid="$(cut -f 3 -s -d '.' <<< "${1}")"
+
+	usr_dir="$(_usr_dir "${usr}")" || \
+		return 1
+	job_dir="${usr_dir}${job}.job/"
+	attrs="${job_dir}job.attrs"
+	attrs_exec="${job_dir}job-${job_pid}.attrs"
+
+	( if ! flock --exclusive ${fd1}; then
+		_log "Error: job pid file '${job}.${usr}.${job_pid}'" \
+			"can't wait for a lock."
+		return 0
+	fi
+	_set_option "${attrs_exec}" "JA_WAIT_STS" ""
+
+	rc="$(_read_option "JA_RC" "${attrs_exec}")" || \
+		rc="127"
+	if [ ${rc} -ne 0 ] && \
+	jobq="$(_read_option "JA_JOBQ" "${attrs}")" && \
+	jobq_onerror="$(awk -v jobq="${jobq}" '$1 == jobq {print $5; exit}' \
+	"${JA_CONF_JOBQS}")" && \
+	[ "${jobq_onerror}" = "HLD" ] && \
+	! dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")"; then
+		_set_option "${JA_SPOOL}${jobq}.jobq.attrs" "JA_HLD" "HLD" || :
+		_jobadmin_msg_job "${job}" "${usr}" "${job_pid}" \
+			"finished with error. Holding job queue '${jobq}'" \
+			"critical"
+	fi
+	_jobadmin_job_end "${job}" "${usr}" "${job_pid}"
+	) {fd1}< "$(_flock_lckfile "${job_dir}job.pid")"
+	_pipe_write "_jobadmin" &
+	:
+}
+
+_jobadmin_job_watchdog() {
+	local job usr job_pid
+	local job_dir usr_dir attrs sts attrs_exec
+	local rc jobq jobq_onerror fd1 fd2
+	local autostr sbs_typ
+
+	_enable_daemon_debug
+
+	job="${1}"
+	usr="${2}"
+	job_pid="${3}"
+
+	[ -z "${JA_DEBUG}" ] || \
+		_log "_jobadmin_job_watchdog: BEGIN '${job}.${usr}.${job_pid}'"
+
+	usr_dir="$(_usr_dir "${usr}")" || return 1
+	job_dir="${usr_dir}${job}.job/"
+	attrs="${job_dir}job.attrs"
+	attrs_exec="${job_dir}job-${job_pid}.attrs"
+	if kill -0 "${job_pid}" > /dev/null 2>&1 && \
+	sts="$(_read_option "JA_JOB_STS" "${attrs}")" && \
+	[ "${sts}" = "ACT" ] && \
+	[ -f "${attrs_exec}" ]; then
+		if ! dummy="$(_read_option "JA_WAIT_STS" "${attrs_exec}")"; then
+			( if ! flock --shared --nonblock ${fd1}; then
+				_usr_notify "Error: _jobadmin_job_watchdog job '${job}.${usr}.${job_pid}' is locked."
+				return 1
+			fi
+
+			[ "$(_read_option "JA_SBSTYP" "${attrs_exec}")" = "0" ] || \
+				_jobadmin_msg_job "${job}" "${usr}" "${job_pid}" "active"
+
+			_set_option "${attrs_exec}" "JA_WAIT_STS" "WAIT"
+
+			sbs_typ="$(_read_option "JA_SBSTYP" "${attrs}")" || :
+			autostr="$(_read_option "JA_AUTOSTR" "${attrs}")" || :
+			if [ -d "/run/systemd/system" ] && \
+			[ "${sbs_typ}" != "1" ] && \
+			[ -z "${autostr}" ]; then
+				systemd-inhibit --why="Running job ${job}.${usr}.${job_pid}" \
+					/usr/sbin/jobadmind --waitflock "${job}.${usr}.${job_pid}"
+			else
+				_jobadmin_waitflock "${job}.${usr}.${job_pid}"
+			fi
+			) {fd1}< "$(_flock_lckfile "${job_dir}")"
+		fi
+	fi
+
+	[ -z "${JA_DEBUG}" ] || \
+		_log "_jobadmin_job_watchdog: END '${job}.${usr}.${job_pid}'"
+}
+
+_jobadmin_job_end() {
+	local job usr job_pid cause d
+	local job_dir usr_dir
+	local outq outhld job_pids sts usr language sudo_user
+	local rc jobq_onerror attrs_exec fd0 fd3
+	local autostr sbs_typ
+
+	job="${1}"
+	usr="${2}"
+	job_pid="${3}"
+	d="${4:-"$(date +%s)"}"
+	cause="${5:-""}"
+
+	usr_dir="$(_usr_dir "${usr}")" || \
+		return 1
+	job_dir="${usr_dir}${job}.job/"
+	attrs="${job_dir}job.attrs"
+
+	[ -z "${JA_DEBUG}" ] || \
+		_log "_jobadmin_job_end: BEGIN '${job}.${usr}.${job_pid}'"
+
+	( if ! flock --shared --timeout 1 ${fd3}; then
+		_log "Error: job '${job}.${usr}' is locked."
+		return 0
+	fi
+
+	outq="$(_read_option "JA_OUTQ" "${attrs}")" || :
+
+	attrs_exec="${job_dir}job-${job_pid}.attrs"
+	if [ ! -s "${attrs_exec}" ]; then
+		_log "Error: job '${job}.${usr}.${job_pid}' not found."
+		return 0
+	fi
+
+	rc="$(_read_option "JA_RC" "${attrs_exec}")" || \
+		rc="127"
+	[ -n "${cause}" ] || \
+		cause="$(_read_option "JA_CAUSE" "${attrs_exec}")" || \
+		cause="CAN"
+	job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+	# associate the cause to the corresponding pid
+	if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]*| \
+	{s||\1:"${cause}"|p;q0};q1" <<< "${job_pids}")"; then
+		_set_option "${attrs}" "JA_PIDS" "${ja_pids}"
+	else
+		_log "Error: when updating cause ${cause} for job '${job}.${usr}.${job_pid}'."
+	fi
+
+	[ "$(_read_option "JA_SBSTYP" "${attrs_exec}")" = "0" ] || \
+		_jobadmin_msg_job "${job}" "${usr}" "${job_pid}" \
+			"finished$(test "${rc}" -eq 0 || printf '%s' ", ${cause} rc=${rc}")" \
+			"$(test "${rc}" -eq 0 || echo "critical")"
+
+	_set_option "${attrs}" "JA_JOB_STS" "END"
+	_set_option "${attrs}" "JA_RC" "${rc}"
+
+	_set_option "${attrs_exec}" "JA_JOB_STS" "END"
+	_set_option "${attrs_exec}" "JA_CAUSE" "${cause}"
+	_set_option "${attrs_exec}" "JA_DATEEND" "${d}"
+	dummy="$(_read_option "JA_RC" "${attrs_exec}")" || \
+		_set_option "${attrs_exec}" "JA_RC" "${rc}"
+
+	outhld="HLD"
+	dummy="$(_read_option "JA_OUTHLD" "${attrs_exec}")" || \
+		outhld=""
+	# stdout
+	splf="job-${job_pid}-stdout"
+	if [ -n "${outhld}" ]; then
+		_set_option "${job_dir}${splf}.splfa" "JA_HLD" "HLD"
+	else
+		_set_option "${job_dir}${splf}.splfa" "JA_DATERLS" "${d}"
+		printf '%s %s\n' "${job}" "${splf}" >> "${usr_dir}${JA_USR_SCDSPLFS}"
+	fi
+	_set_option "${job_dir}${splf}.splfa" \
+		"JA_SPLF_STS" ""
+	# stderr
+	if ! dummy="$(_read_option "JA_LJOIN" "${attrs_exec}")"; then
+		splf="job-${job_pid}-stderr"
+		if [ -n "${outhld}" ]; then
+			_set_option "${job_dir}${splf}.splfa" "JA_HLD" "HLD"
+		else
+			_set_option "${job_dir}${splf}.splfa" "JA_DATERLS" "${d}"
+			printf '%s %s\n' "${job}" "${splf}" >> "${usr_dir}${JA_USR_SCDSPLFS}"
+		fi
+		_set_option "${job_dir}${splf}.splfa" "JA_SPLF_STS" ""
+	fi
+
+	sbs_typ="$(_read_option "JA_SBSTYP" "${attrs}")" || :
+	autostr="$(_read_option "JA_AUTOSTR" "${attrs}")" || :
+	if [ "${rc}" = "0" -a "${sbs_typ}" = "1" ] || \
+	[ "${rc}" != "0" -a -n "${autostr}" ]; then
+		_usr_scdjobs_add "${usr_dir}" "${job}"
+		_set_option "${attrs}" "JA_DATERLS" "$(date +%s)"
+		_set_option "${attrs}" "JA_JOB_STS" ""
+		_set_option "${attrs_exec}" "JA_JOB_STS" ""
+	else
+		_usr_scdjobs_remove "${usr_dir}" "${job}"
+		_set_option "${attrs}" "JA_HLD" ""
+		_set_option "${attrs}" "JA_JOB_STS" "OUTQ"
+		_set_option "${attrs_exec}" "JA_JOB_STS" "OUTQ"
+	fi
+
+	# trace
+	splf_xtrace="${job_dir}job-${job_pid}-xtrace.splfa"
+	if [ -e "${splf_xtrace}" ]; then
+		_set_option "${splf_xtrace}" "JA_HLD" "HLD"
+		_set_option "${splf_xtrace}" "JA_SPLF_STS" ""
+	fi
+
+	rm -f "${job_dir}job.pid"
+
+	) {fd3}< "$(_flock_lckfile "${job_dir}")"
+
+	[ -z "${JA_DEBUG}" ] || \
+		_log "_jobadmin_job_end: END '${job}.${usr}.${job_pid}'"
+}
+
+# this procedure is executed by the user of that job
+# Prepares the environment and executes the job
+_jobadmin_exec() {
+	local JA_JOB JA_USR
+	local job_pid pidfile job_pids cancelled JA_USR_DIR JA_JOB_DIR attrs attrs_exec d
+	local rc cause timestart inter ljoin outq outpty
+	local splf_sav splf_stdout splf_stderr fd1 fd2 fd3 fd4
+
+	JA_JOB="${1}"
+	JA_USR="${2}"
+	_usr_valid "${JA_USR}" && \
+		[ "${JA_USR}" = "$(id -un)" ] || \
+		return 1
+	JA_USR_DIR="$(_usr_dir "${JA_USR}")" || \
+		return 1
+	JA_JOB_DIR="${JA_USR_DIR}${JA_JOB}.job/"
+	job_pid="${$}"
+
+	# enable debug
+	bash_xtracefd=2
+	timestart="$(date +%s)"
+	attrs="${JA_JOB_DIR}job.attrs"
+	JA_DEBUG="${JA_DEBUG_EXEC:-"$(_read_option "JA_DBG" "${attrs}" || :)"}"
+	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
+	if [ -n "${JA_DEBUG:-}" ]; then
+		splf_xtrace="${JA_JOB_DIR}job-${job_pid}-xtrace"
+		exec {bash_xtracefd}>> "${splf_xtrace}.splf"
+		BASH_XTRACEFD="${bash_xtracefd}"
+		set -x
+	fi
+
+	trap '_pipe_write "_jobadmin"' EXIT
+
+	attrs_exec="${JA_JOB_DIR}job-${job_pid}.attrs"
+	_set_option "${attrs}" "JA_RC" ""
+	job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+	cp "${attrs}" "${attrs_exec}"
+	_set_option "${attrs_exec}" "JA_CAUSE" ""
+	_set_option "${attrs_exec}" "JA_PIDS" ""
+	_set_option "${attrs_exec}" "JA_TTY" "$(tty)"
+	_set_option "${attrs_exec}" "JA_DATESTR" "${timestart}"
+	pidfile="${JA_JOB_DIR}job.pid"
+	( if ! flock --exclusive --timeout 1 ${fd1} || \
+	! flock --shared --timeout 1 ${fd2}; then
+			_usr_notify "Error: Can't execute job '${JA_JOB}.${JA_USR}' because it's locked." >&2
+			_set_option "${attrs}" "JA_JOB_STS" "END"
+			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
+			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
+			_set_option "${attrs_exec}" "JA_CAUSE" "LCK"
+			_set_option "${attrs_exec}" "JA_RC" "127"
+			_set_option "${attrs_exec}" "JA_DATEEND" "${timestart}"
+			return 0
+		fi
+
+		jobq="$(_read_option "JA_JOBQ" "${attrs_exec}")" || :
+		sbsd="$(awk -v jobq="${jobq}" '$1 == jobq {print $2; exit}' \
+			"${JA_CONF_JOBQS}")"
+		( if ! flock --shared --nonblock ${fd3} || \
+		! flock --shared --nonblock ${fd4}; then
+			# we should never manage jobq and sbsd descriptions while jobs are active
+			_usr_notify "Error: Can't execute job '${JA_JOB}.${JA_USR}' because jobq or sbsd are locked." >&2
+			_set_option "${attrs}" "JA_JOB_STS" "END"
+			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
+			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
+			_set_option "${attrs_exec}" "JA_CAUSE" "LCK"
+			_set_option "${attrs_exec}" "JA_RC" "127"
+			_set_option "${attrs_exec}" "JA_DATEEND" "${timestart}"
+			return 0
+		fi
+			outq="$(_read_option "JA_OUTQ" "${attrs_exec}")" || :
+			outpty="$(_read_option "JA_OUTPTY" "${attrs_exec}")" || :
+			#inter="$(_read_option "JA_INTER" "${attrs_exec}")" || :
+			#if [ "${inter}" != "Yes" ]; then
+			#	export DEBIAN_FRONTEND="noninteractive"
+			#	export JA_INTER="No"
+			#	exec 0>&-
+			#fi
+			ljoin="$(_read_option "JA_LJOIN" "${attrs_exec}")" || :
+			sudo_user="$(_read_option "JA_SUDO_USR" "${attrs_exec}")" || :
+			sbs_typ="$(_read_option "JA_SBSTYP" "${attrs}")" || :
+			_set_option "${attrs_exec}" "JA_SBSTYP" "${sbs_typ}"
+
+			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:ACT"
+			_set_option "${attrs}" "JA_JOB_STS" "ACT"
+			printf '%s\n' "${job_pid}" > "${pidfile}"
+
+			# wait for end of execution
+			_pipe_write "_job_watchdog:${JA_JOB}:${JA_USR}:${job_pid}" &
+
+			splf_sav="$(_read_option "JA_SPLFSAV" "${attrs}")" || :
+			if [ -n "${JA_DEBUG:-}" ]; then
+				_set_option "${splf_xtrace}.splfa" "JA_SPLF" \
+					"$(basename "${splf_xtrace}").splf"
+				_set_option "${splf_xtrace}.splfa" "JA_OUTQ" "${outq}"
+				_set_option "${splf_xtrace}.splfa" "JA_SPLF_STS" "OPN"
+				_set_option "${splf_xtrace}.splfa" "JA_DATESBM" "${timestart}"
+				_set_option "${splf_xtrace}.splfa" "JA_OUTPTY" "${outpty}"
+				_set_option "${splf_xtrace}.splfa" "JA_SUDO_USR" "${sudo_user}"
+				[ -z "${splf_sav}" ] || \
+					_set_option "${splf_xtrace}.splfa" "JA_SAVED" "Yes"
+			fi
+
+			splf_stdout="${JA_JOB_DIR}job-${job_pid}-stdout"
+			if [ -n "${ljoin}" ]; then
+				splf_stderr="${splf_stdout}"
+			else
+				splf_stderr="${JA_JOB_DIR}job-${job_pid}-stderr"
+				_set_option "${splf_stderr}.splfa" "JA_SPLF" \
+					"$(basename "${splf_stderr}").splf"
+				_set_option "${splf_stderr}.splfa" "JA_OUTQ" "${outq}"
+				_set_option "${splf_stderr}.splfa" "JA_SPLF_STS" "OPN"
+				_set_option "${splf_stderr}.splfa" "JA_DATESBM" "${timestart}"
+				_set_option "${splf_stderr}.splfa" "JA_OUTPTY" "${outpty}"
+				_set_option "${splf_stderr}.splfa" "JA_SUDO_USR" "${sudo_user}"
+				[ -z "${splf_sav}" ] || \
+					_set_option "${splf_stderr}.splfa" "JA_SAVED" "Yes"
+			fi
+			_set_option "${splf_stdout}.splfa" "JA_SPLF" \
+				"$(basename "${splf_stdout}").splf"
+			_set_option "${splf_stdout}.splfa" "JA_OUTQ" "${outq}"
+			_set_option "${splf_stdout}.splfa" "JA_SPLF_STS" "OPN"
+			_set_option "${splf_stdout}.splfa" "JA_DATESBM" "${timestart}"
+			_set_option "${splf_stdout}.splfa" "JA_OUTPTY" "${outpty}"
+			_set_option "${splf_stdout}.splfa" "JA_SUDO_USR" "${sudo_user}"
+			[ -z "${splf_sav}" ] || \
+				_set_option "${splf_stdout}.splfa" "JA_SAVED" "Yes"
+
+			exec >  >(tee -a "${splf_stdout}.splf")
+			exec 2> >(tee -a "${splf_stderr}.splf" >&2)
+
+			cmd="${JA_JOB_DIR}job-${job_pid}.cmd"
+			cp "${JA_JOB_DIR}job.cmd" "${cmd}"
+			printf 'Executing: %s\n' "${cmd}" >&2
+			cd "$(_read_option "JA_PWD" "${attrs}")" || \
+				cd "$(_usr_homedir "${JA_USR}")" || :
+
+			# execute as a separate process to isolate errors from this one.
+			"${cmd}" &
+			if wait -f "${!}"; then
+				rc="0"
+				cause="OK"
+			else
+				rc="${?}"
+				cause="ERR"
+			fi
+
+			timestart="$(($(date +%s)-${timestart}))"
+			printf '%s seconds = %s.\n' "${timestart}" \
+				"$(date --date=@$((${timestart}-3600)) "+%kh%Mm%Ss")" >&2
+			_set_option "${attrs}" "JA_JOB_STS" "END"
+			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
+			_set_option "${attrs_exec}" "JA_CAUSE" "${cause}"
+			_set_option "${attrs_exec}" "JA_DATEEND" "$(date +%s)"
+			_set_option "${attrs_exec}" "JA_RC" "${rc}"
+
+			if [ ${rc} -gt 0 ] && \
+			onerror="$(_read_option "JA_ONERROR" "${attrs}")"; then
+				( ${onerror} ) &
+				wait -f "${!}" || :
+			fi
+
+			if screen_status="$(_screen_list "${JA_USR}")" && \
+			[ "$(awk -v jobpid="${job_pid}" -v job="${JA_JOB}" \
+			'$1 == jobpid && $2 == job {print $3; exit}' \
+			<<< "${screen_status}")" = "Attached" ]; then
+				printf '%s\n' "Job ended." >&2
+				sleep 5
+			fi
+
+			trap - EXIT
+
+		) {fd3}< "$(_flock_lckfile "${JA_SPOOL}${jobq}.jobq")" \
+		{fd4}< "$(_flock_lckfile "${JA_SPOOL}${sbsd}.sbsd")"
+
+	) {fd1}< "$(_flock_lckfile "${pidfile}")" \
+	{fd2}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+
+	:
+}
+
+_jobadmin_msg_allusrs() {
+	local urgency
+	local msg language
+	local usr
+
+	msg="From user ${1}:${NL}${2}."
+	urgency="${3:-}"
+	_log "Message ${urgency} to all users: '${msg}'"
+	language="${JA_LANGUAGE}"
+	for usr in $(_system_users); do
+		_jobadmin_msg_usr "${usr}" "${msg}" "${urgency}" &
+	done
+	:
+}
+
+_jobadmin_msg_oneusr() {
+	local usr msg
+	local language
+	usr="${2}"
+	msg="From user ${1}:${NL}${3}."
+
+	language="${JA_LANGUAGE}"
+	if _system_users | grep -qswe "${usr}"; then
+		_log "Message to user '${usr}': '${msg}'"
+		_jobadmin_msg_usr "${usr}" "${msg}" &
+	fi
+	:
+}
+
+_systemd_inhibited() {
+	! grep -qswe 'IMMED' "${JA_TMP}pwrdwnsys.now" && \
+		[ -d "/run/systemd/system" ] || \
+		return 1
+	systemd-inhibit --list --mode=block | \
+		awk '! $1 {l=""}
+		$1 == "Who:" {l=$0}
+		$1 == "What:" && $2 ~ "shutdown|sleep|idle" && l {rc=-1; exit}
+		END{exit rc+1}'
+}
+
+_inhibit_watchdog() {
+	local fd0
+	( if ! flock --exclusive --nonblock ${fd0}; then
+		return 0
+	else
+		while _systemd_inhibited; do
+			sleep 1
+		done
+	fi
+	) {fd0}< "$(_flock_lckfile "${JA_TMP}pwrdwnsys-watchdog.txt")"
+	_pipe_daemon_write "jobadmin"
+	:
+}
+
+_jobadmin_notify_loggedinusrs() {
+	local msg urgency notifyID
+	local usr fd0
+	local language="${JA_LANGUAGE}"
+
+	urgency="${1}"
+	shift
+	msg="${@}"
+
+	for usr in $(users); do
+		notifyID="$(awk -v usr="${usr}" '$1 == usr {print $2; exit}' \
+			"${JA_TMP}pwrdwnsys.notifyIDs")"
+		[ "${notifyID}" != "0" ] || \
+			continue
+		notifyID="$(_jobadmin_msg_usr "${usr}" \
+			"${msg}" "${urgency}" "y" "${notifyID}")"
+		[[ ${notifyID} =~ ^[[:digit:]]+$ ]] || \
+			notifyID="0"
+		grep -qswe "^${usr}" "${JA_TMP}pwrdwnsys.notifyIDs" && \
+			sed -i -re "\|^${usr}\b.*$| s||${usr} ${notifyID}|" \
+			"${JA_TMP}pwrdwnsys.notifyIDs" || \
+			printf "%s %s\n" "${usr}" "${notifyID}" >> \
+				"${JA_TMP}pwrdwnsys.notifyIDs"
+	done
+	:
+}
+
+_jobadmin_pwroff() {
+	local attrs pwr_restart \
+		delay urgency immed fd0
+
+	attrs="${JA_TMP}pwrdwnsys.attrs"
+	pwr_restart="$(_read_option "JA_RESTART" "${attrs}")" || \
+		return 0
+
+	delay="$(_read_option "JA_DELAY" "${attrs}")" || \
+		delay=1
+	immed="$(test "IMMED" != "$(cat "${JA_TMP}pwrdwnsys.now")" || echo "y")"
+	if flock --exclusive --timeout 1 ${fd0}; then
+		: > "${JA_TMP}pwrdwnsys.notifyIDs"
+		while [ -s "${JA_TMP}pwrdwnsys.now" ] && \
+		! _systemd_inhibited && \
+		_jobadmin_status; do
+			[ ${delay} -gt 0 ] && \
+				urgency="critical:2000" || \
+				urgency=":2000"
+			_jobadmin_notify_loggedinusrs "${urgency}" \
+				"From jobadmin daemon:" \
+				"${NL}System will ${pwr_restart} in ${delay} seconds"
+			[ $((delay--)) -gt 0 ] || \
+				break
+			sleep 1
+		done
+		if [ ${delay} -gt 0 ]; then
+			_set_option "${attrs}" "JA_PID" ""
+			_set_option "${attrs}" "JA_NOTIFIED" ""
+
+			if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
+				_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
+					"${NL}Found active jobs, deferring System shutdown"
+				_jobadmin_allusrs_msg "From jobadmin daemon:" \
+					"${NL}Found active jobs, deferring System shutdown"
+				_pipe_daemon_write "_inhibit_watchdog" &
+			else
+				_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
+					"${NL}Power down system has been cancelled"
+				_jobadmin_allusrs_msg "From jobadmin daemon:" \
+					"${NL}Power down system has been cancelled"
+			fi
+			return 0
+		fi
+
+		_jobadmin_notify_loggedinusrs ":1" \
+			"From jobadmin daemon:" \
+			"${NL}Executing system ${pwr_restart}"
+		_jobadmin_allusrs_msg "From jobadmin daemon:" \
+			"${NL}Executing system ${pwr_restart}"
+	else
+		echo "flock ${JA_TMP}pwrdwnsys.notifyIDs error code: $?"
+		return 0
+	fi {fd0}< "$(_flock_lckfile "${JA_TMP}pwrdwnsys.notifyIDs")"
+
+	truncate -s 0 $(_expand_glob "${JA_TMP}pwrdwnsys.*")
+
+	exec > "${JA_TMP}pwrdwnsys.sh"
+	printf '%s\n' "#!/bin/sh"
+	printf 'unlink %s\n' "${JA_TMP}pwrdwnsys.sh"
+	case "${pwr_restart}" in
+	REBOOT)
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_REBOOT}" || \
+			printf '%s\n' "${JA_CMD_REBOOT_IMMED:-"${JA_CMD_REBOOT}"}"
+		;;
+	SUSPEND)
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_SUSPEND}" || \
+			printf '%s\n' "${JA_CMD_SUSPEND_IMMED:-"${JA_CMD_SUSPEND}"}"
+		;;
+	HIBERNATE)
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_HIBERNATE}" || \
+			printf '%s\n' "${JA_CMD_HIBERNATE_IMMED:-"${JA_CMD_HIBERNATE}"}"
+		;;
+	HALT)
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_HALT}" || \
+			printf '%s\n' "${JA_CMD_HALT_IMMED:-"${JA_CMD_HALT}"}"
+		;;
+	*)
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_POWEROFF}" || \
+			printf '%s\n' "${JA_CMD_POWEROFF_IMMED:-"${JA_CMD_POWEROFF}"}"
+		;;
+	esac
+	chmod a+x "${JA_TMP}pwrdwnsys.sh"
+	> /dev/null 2>&1 setsid "${JA_TMP}pwrdwnsys.sh" &
+	:
+}
+
+_jobadmind_manage_perms() {
+	local perms="${1:-}"
+	shift
+	local f perm p
+
+	( cd "${JA_SPOOL}"
+		touch "${@}"
+		setfacl --remove-all "${@}" || \
+			_log "Error: Can't remove ACL's in device" \
+				"'$(df "${JA_SPOOL}" | awk 'NR == 2 {print $1}')'."
+		[ -n "${perms}" -a "${perms}" != '-' ] || \
+			return 0
+		p=""
+		for perm in $(tr -s ',' ' ' <<< "${perms}"); do
+			if grep -qse '^@' <<< "${perm}"; then
+				p="${p:+"${p},"}group:${perm:1}:rw-"
+			else
+				[ "${perm}" != "-" ] || \
+					perm=""
+				p="${p:+"${p},"}user:${perm}:rw-"
+			fi
+		done
+		[ -z "${p}" ] || \
+			setfacl --modify "${p}" "${@}" || :
+	)
+	:
+}
+
+# This is the initial config load.
+# Actually the configuration can't be reloaded,
+# To reload the configuration must stop and restart the daemon.
+_jobadmin_LoadConfig() {
+	local conf value
+	[ ! -s "${JA_CONF}" ] || \
+		. "${JA_CONF}"
+
+	_log "Parsing configuration files."
+
+	while read -r value; do
+		[ ! -f "${value}" ] || \
+			awk '$1 ~ "^[^#]" {$1=$1; print}' "${value}" > \
+			"${JA_TMP}$(basename "${value}")"
+	done < <(_expand_glob "${JA_CONF_DIR}*.conf")
+
+	printf '%s\n' ",s/^JA_RESTART[[:blank:]].*/JA_RESTART * ${JA_CMD_REBOOT:+"REBOOT,"}${JA_CMD_SUSPEND:+"SUSPEND,"}${JA_CMD_HIBERNATE:+"HIBERNATE,"}${JA_CMD_HALT:+"HALT,"}${JA_CMD_POWEROFF:+"POWEROFF"}/g" 'w' | \
+	ed -s "${JA_CONF_PARMVALS}" 2> /dev/null || \
+		[ -z "${JA_DEBUG}" ] || \
+		eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+
+	for conf in class jobds jobqs outqs sbsds rwtrs; do
+		awk '{print $1}' "${JA_TMP}${conf}.conf" | \
+			sort | \
+			_comma_separated > \
+			"${JA_TMP}${conf}.lst"
+	done
+
+	prts=( $(lpstat -d | awk '{print $NF}') )
+	for prt in $(lpstat -a | awk '{print $1}' | sort); do
+		grep -qswe "${prt}" <<< "${prts[@]}" || \
+			prts+=( "${prt}" )
+	done
+	printf '%s\n' "${prts[@]}" > "${JA_TMP}rprts.lst"
+
+	( set +o noglob
+	( ls -1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \
+		tr -s '\n' '\000' | \
+		xargs -r0 basename -s '.usr' ) | \
+	sort --unique | \
+	_comma_separated > "${JA_TMP}users.lst"
+
+	[ "$(stat --format='%G' "${JA_SPOOL}")" = "adm" ] || \
+		chown --no-dereference root:adm \
+			$(find -P "${JA_SPOOL}" -maxdepth 1)
+	# permission to manage jobq, sbsd, outq, wtr
+	unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	while read -r jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror; do
+		_jobadmind_manage_perms "${jobq_perms}" "${jobq}.jobq" "${jobq}.jobq.attrs"
+		unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	done < "${JA_CONF_JOBQS}"
+	unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	while read -r sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms; do
+		_jobadmind_manage_perms "${sbsd_perms}" "${sbsd}.sbsd" "${sbsd}.sbsd.attrs"
+		unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	done < "${JA_CONF_SBSDS}"
+	unset outq outq_wtr outq_strwtr outq_perms
+	while read -r outq outq_wtr outq_strwtr outq_perms; do
+		_jobadmind_manage_perms "${outq_perms}" "${outq}.outq" "${outq}.outq.attrs"
+		unset outq outq_wtr outq_strwtr outq_perms
+	done < "${JA_CONF_OUTQS}"
+	unset wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+	while read -r wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms; do
+		_jobadmind_manage_perms "${wtr_perms}" "${wtr}.wtr" "${wtr}.wtr.attrs"
+		unset wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+	done < "${JA_CONF_WTRS}"
+	:
+}
+
+_jobadmin_stop() {
+	local parent_lineno="${1:-}"
+	local cmd="${2:-}"
+	if [ -n "${parent_lineno}" -a "${parent_lineno}" -gt 1 ]; then
+		_log "Error on command '${cmd}' near line ${parent_lineno}."
+	fi
+	# Daemon exits
+	trap - EXIT
+	kill -TERM $(_ps_children) > /dev/null 2>&1
+	rm -f "${JA_PIDFILE}" "${JA_PIPE}" "${JA_PIPE_WTR}" "${JA_PIPE_DAEMON}"
+	wait > /dev/null 2>&1 || :
+	_log "Daemon stopped."
+	exit 0
+}
+
+_jobadmin_wtrs_interval() {
+	while :; do
+		inotifywait -e modify "${JA_TMP}splfs_wtr.lst" > /dev/null 2>&1 &
+		wait -f "${!}" || :
+		_jobadmin_status || return 0
+		if [ -s "${JA_TMP}splfs_wtr.lst" ]; then
+			_pipe_wtr_write "_jobadmin" &
+			sleep 1
+		fi
+	done
+	:
+}
+
+_jobadmin_pipe_read() {
+	local command
+	while :; do
+		_jobadmin_status || \
+			return 0
+		command="$(_pipe_pull "${JA_PIPE}")" && \
+			[ -n "${command}" ] || continue
+		case "${command}" in
+		_jobadmin)
+			_pipe_daemon_write "_jobadmin" &
+			;;
+		_usr_dir:*)
+			_create_usr_dir "$(cut -f 2 -s -d ':' <<< "${command}")" &
+			;;
+		_usr_notify:*)
+			_jobadmin_usr_notify "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				 "$(cut -f 3 -s -d ':' <<< "${command}" | tr '@' '\n')" &
+			;;
+		_msg_allusrs:*)
+			_jobadmin_msg_allusrs "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				"$(cut -f 3 -s -d ':' <<< "${command}" | tr '@' '\n')" &
+			;;
+		_msg_oneusr:*)
+			_jobadmin_msg_oneusr "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				"$(cut -f 3 -s -d ':' <<< "${command}")" \
+				"$(cut -f 4 -s -d ':' <<< "${command}" | tr '@' '\n')" &
+			;;
+		_job_watchdog:*)
+			_jobadmin_job_watchdog "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				 "$(cut -f 3 -s -d ':' <<< "${command}")" \
+				 "$(cut -f 4 -s -d ':' <<< "${command}")" &
+			;;
+		*)
+			_log "Invalid command received from the pipe: ${command}"
+			;;
+		esac
+	done
+}
+
+_jobadmin_splf_end() {
+	if lpstat -U "${job_usr}" -p "${prt}" -o | \
+	awk -v usr="${job_usr}" '$2 == usr {print $1}' | \
+	grep -qswe "${request}"; then
+		return 0
+	fi
+
+	# values: completed or canceled
+	if ! cause="$(ipptool -t \
+		"${JA_CUPS_SERVER}jobs/$(sed -nre '\|.*-([[:digit:]]+)$| s||\1|p' \
+		<<< "${request}")" \
+		"${JA_LIB}get-job-attributes" | \
+		awk '$1 == "job-state" {print $NF; s=-1; exit}
+		END{exit s+1}')" || \
+	( [ "${cause}" != "completed" ] && [ "${cause}" != "canceled" ] ); then
+		_log "Error: wrong completion of printing: '${splf_attrs}'."
+		return 0
+	fi
+	_set_option "${splf_attrs}" "JA_CAUSE" "${cause}"
+
+	wtr_action="$(_read_option "JA_WTR_ACTION" "${splf_attrs}")" || :
+	if [ "${wtr_action}" = "DLT" ] && \
+	[ "${cause}" = "completed" ]; then
+		dataf="$(dirname "${splf_attrs}")/$(_read_option \
+			"JA_SPLF" "${splf_attrs}" || :)"
+		rm -f "${dataf}" "${splf_attrs}"
+	else
+		_set_option "${splf_attrs}" "JA_DATEEND" "$(date +%s)"
+		_set_option "${splf_attrs}" "JA_SPLF_STS" "SAV"
+	fi
+	job="$(basename "$(dirname "${splf_attrs}")" ".job")"
+	job_pid="$(basename "${splf_attrs}" | \
+		sed -re '\|job-([[:digit:]]+)-.*| s||\1|')"
+	splf="$(basename "${splf_attrs}" | \
+		sed -re '\|job-[[:digit:]]+-(.*)\.splfa| s||\1|')"
+	message="Print request '${request}' ${cause}. $( \
+		test "${wtr_action}" = "DLT" && \
+		printf '%s' 'Deleting' || \
+		printf '%s' 'Saving' \
+		) spool file '${splf} ${job}.${job_usr}.${job_pid}'."
+	_log "${message}"
+	for usr in ${job_usr} $(_read_option "JA_SUDO_USR" "${splf_attrs}"); do
+		_jobadmin_msg_usr "${usr}" "${message}" &
+	done
+	printf '%s\n' "${splf_attrs}" >> "${JA_TMP}splfs_end.lst"
+	:
+}
+
+_jobadmin_splfs_end() {
+	local splf="${1}"
+	local job="${2}"
+	local job_usr="${3}"
+	local pid="${4}"
+	local fd1
+
+	( if ! flock --shared --nonblock ${fd1}; then
+		_log "Error: 5 'splfs_wtr.lst' is locked."
+	else
+		truncate -s 0 "${JA_TMP}splfs_end.lst"
+		if [ -z "${splf}" ]; then
+			unset cause request prt job_usr splf_attrs
+			while read -r cause request prt job_usr splf_attrs; do
+				[ -s "${splf_attrs}" ] || continue
+				_jobadmin_splf_end
+				unset cause request prt job_usr splf_attrs
+			done < <(sort -k 4,4 -k 3,3 "${JA_TMP}splfs_wtr.lst")
+		else
+			splf_attrs="$(_usr_dir "${job_usr}")${job}.job/job-${pid}-${splf}.splfa"
+			prt="$(_read_option "JA_PRT" "${splf_attrs}")" || return 1
+			request="$(_read_option "JA_REQUEST" "${splf_attrs}")" || return 1
+			_jobadmin_splf_end
+		fi
+	fi
+	) {fd1}< "$(_flock_lckfile "${JA_TMP}splfs_wtr.lst")"
+
+	[ ! -s "${JA_TMP}splfs_end.lst" ] || \
+	( if ! flock --exclusive --timeout 1 ${fd1}; then
+		_log "Error: 1 'splfs_wtr.lst' is locked."
+	else
+		while read -r splf_attrs; do
+			[ -n "${splf_attrs}" ] || continue
+			printf '%s\n' "g/^${splf_attrs}$/d" 'w' | \
+			ed -s "${JA_TMP}splfs_wtr.lst" 2> /dev/null || \
+				[ -z "${JA_DEBUG}" ] || \
+				eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+		done < "${JA_TMP}splfs_end.lst"
+		truncate -s 0 "${JA_TMP}splfs_end.lst"
+		_pipe_write "_jobadmin" &
+	fi
+	) {fd1}< "$(_flock_lckfile "${JA_TMP}splfs_wtr.lst")"
+
+	:
+}
+
+_jobadmin_wtrs_monitor() {
+	local command parms
+
+	while :; do
+		_jobadmin_status || return 0
+		command="$(_pipe_pull "${JA_PIPE_WTR}")" && \
+			[ -n "${command}" ] || continue
+		case "${command}" in
+		_jobadmin:*)
+			parms="$(cut -f 2 -s -d ':' <<< "${command}")"
+			_jobadmin_splfs_end \
+				"$(cut -f 1 -s -d '.' <<< "${parms}")" \
+				"$(cut -f 2 -s -d '.' <<< "${parms}")" \
+				"$(cut -f 3 -s -d '.' <<< "${parms}")" \
+				"$(cut -f 4 -s -d '.' <<< "${parms}")" &
+			;;
+		_jobadmin)
+			_jobadmin_wtrs_init &
+			;;
+		*)
+			_log "Invalid command '${command}' received from" \
+				"pipe '${JA_PIPE_WTR}'."
+			;;
+		esac
+	done
+	:
+}
+
+_jobadmin_wtrs_init() {
+	# global
+	local init="${1:-""}"
+	local wtr prt wtr_eml wtr_action wtr_autostr
+	local splf_attrs sts job_usr prt fd1
+
+	if [ "${init}" = "Yes" ]; then
+		# writers initial status, active or stopped
+		unset wtr prt wtr_eml wtr_action wtr_autostr wtr_perms
+		while read -r wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms rest; do
+			[ -n "${wtr}" ] || continue
+			if [ "${wtr_autostr}" = "Yes" ]; then
+				_set_option "${JA_SPOOL}${wtr}.wtr" "JA_WTR_OUTQS" \
+					"$(awk -v wtr="${wtr}" '$2 == wtr {print $1}' "${JA_CONF_OUTQS}" | \
+					sort | \
+					_comma_separated " ")"
+				_set_option "${JA_SPOOL}${wtr}.wtr" "JA_WTR_STS" ""
+			else
+				_set_option "${JA_SPOOL}${wtr}.wtr" "JA_WTR_STS" "STP"
+			fi
+			unset wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+		done < "${JA_CONF_WTRS}"
+	fi
+
+	( if ! flock --exclusive --timeout 1 ${fd1}; then
+		_log "Error: 2 'splfs_wtr.lst' is locked."
+	else
+
+	truncate -s 0 "${JA_TMP}splfs_wtr.lst"
+	unset splf_attrs
+	while read -r splf_attrs; do
+		[ -s "${splf_attrs}" ] || continue
+		sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || \
+			continue
+		if [ "${sts}" = "WTR" ]; then
+			job_usr="$(stat -c "%U" "${splf_attrs}")"
+			prt="$(_read_option "JA_PRT" "${splf_attrs}")" || \
+				continue
+			request="$(_read_option "JA_REQUEST" "${splf_attrs}")" || \
+				continue
+			cause="$(ipptool -t \
+				"${JA_CUPS_SERVER}jobs/$(sed -nre '\|.*-([[:digit:]]+)$| s||\1|p' \
+				<<< "${request}")" \
+				"${JA_LIB}get-job-attributes" | \
+				awk '$1 == "job-state" {print $NF; s=-1; exit}
+				END{exit s+1}')" || cause="-"
+			( printf '%s ' "${cause}" "${request}" \
+				"${prt}" "${job_usr}" \
+				"${splf_attrs}"
+			printf '\n' ) >> "${JA_TMP}splfs_wtr.lst"
+
+		fi
+		unset splf_attrs
+	done < <(_find_job_files "*.splfa" "")
+	fi
+	) {fd1}< "$(_flock_lckfile "${JA_TMP}splfs_wtr.lst")"
+
+	_jobadmin_splfs_end "" "" "" ""
+	:
+}
+
+_jobadmin_jobs_check_active() {
+	local pidfile job_pid
+	[ "${sts}" = "ACT" -o "${sts}" = "END" ] || \
+		return 0
+	pidfile="${job_dir}job.pid"
+	[ -s "${pidfile}" ] || \
+		return 1
+	job_pid="$(cat "${pidfile}")"
+	( if ! flock --exclusive --nonblock ${fd1}; then
+		sbs_typ="$(awk -v sbsd="${sbsd}" '$1 == sbsd {print $5; exit}' \
+			"${JA_CONF_SBSDS}")"
+		( printf '%s ' \
+			"${job}" "${usr}" \
+			"${sbsd}" "${jobq}" \
+			"${sbs_typ}" "${job_pid}"
+		printf '\n' ) >> "${JA_TMP}jobs_active.lst"
+		return 1
+	fi
+	usr="$(stat -c "%U" "${pidfile}")"
+	jobq_onerror="$(awk -v jobq="${jobq}" '$1 == jobq {print $5; exit}' "${JA_CONF_JOBQS}")"
+	if [ "${jobq_onerror}" = "HLD" ] && \
+	! dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")"; then
+		_set_option "${JA_SPOOL}${jobq}.jobq.attrs" "JA_HLD" "HLD" || :
+		_jobadmin_msg_job "${job}" "${usr}" "${job_pid}" \
+			"Finished with error. Holding job queue '${jobq}'" \
+			"critical"
+		# job queue status has changed
+		jobqs_active="$(awk -v jobq="${jobq}" \
+		'{for(i=1;i<=NF;i++){if ($i != jobq) printf $i" "}}' \
+		<<< "${jobqs_active}")"
+	fi
+	attrs_exec="${job_dir}job-${job_pid}.attrs"
+	_set_option "${attrs_exec}" "JA_RC" "127"
+	_jobadmin_job_end "${job}" "${usr}" "${job_pid}"
+	) {fd1}< "$(_flock_lckfile "${pidfile}")"
+}
+
+_jobadmin_jobs_check() {
+	local jobqs_active fd1 fd2 cgexec autostr
+	local jobq_actjobs sbsd_actjobs
+	local sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	local cls_cgrp
+	local jobscd usr_dir job job_dir attrs jobq usr sts hld timejob pty pidfile
+	local jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+	local pty timejob job usr sbsd jobq job_dir runprops
+
+	truncate -s 0 "${JA_TMP}jobs.lst" "${JA_TMP}jobs_active.lst"
+
+	# list active job queues
+	#  subsystem: not stopped
+	#  job queue: any status
+	jobqs_active=""
+	unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	while read -r sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms rest; do
+		[ -n "${sbsd}" ] || \
+			continue
+		if dummy="$(_read_option "JA_SBSD_STS" "${JA_SPOOL}${sbsd}.sbsd")"; then
+			continue
+		fi
+		touch "${JA_SPOOL}${sbsd}.sbsd"
+
+		unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+		while read -r jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror rest ;do
+			[ -n "${jobq}" ] || \
+				continue
+			touch "${JA_SPOOL}${jobq}.jobq"
+			jobqs_active="${jobqs_active}${jobqs_active:+" "}${jobq}"
+			unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+		done < <(awk -v sbsd="${sbsd}" '$2 == sbsd {print}' "${JA_CONF_JOBQS}")
+		unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	done < "${JA_CONF_SBSDS}"
+	[ -z "${JA_DEBUG:-}" ] || \
+		_log "$(printf 'active job queues: %s\n' "${jobqs_active}")"
+
+	unset jobscd
+	while read -r jobscd; do
+		[ -s "${jobscd}" ] || continue
+		usr_dir="$(dirname "${jobscd}")/"
+		unset job
+		while read -r job; do
+			job_dir="${usr_dir}${job}.job/"
+			[ -d "${job_dir}" ] || \
+				continue
+			attrs="${job_dir}job.attrs"
+			jobq="$(_read_option "JA_JOBQ" "${attrs}")" || \
+				continue
+			sbsd="$(awk -v jobq="${jobq}" '$1 == jobq {print $2; exit}' \
+				"${JA_CONF_JOBQS}")"
+			usr="$(stat -c "%U" "${attrs}")"
+			sts="$(_read_option "JA_JOB_STS" "${attrs}")" || :
+			_jobadmin_jobs_check_active || \
+				continue
+			if ! sts="$(_read_option "JA_JOB_STS" "${attrs}")" && \
+			! hld="$(_read_option "JA_HLD" "${attrs}")" && \
+			grep -qswe "${jobq}" <<< "${jobqs_active}"; then
+				timejob="$(_read_option "JA_DATERLS" "${attrs}")" || \
+					timejob=0
+				pty="$(_read_option "JA_PTY" "${attrs}")" || pty="3"
+				( printf '%s ' \
+					"${pty}" "${timejob}" "${job}" "${usr}" \
+					"${sbsd}" "${jobq}" "$(dirname "${attrs}")/"
+				printf '\n' ) >> "${JA_TMP}jobs.lst"
+			fi
+			unset job
+		done < <(cat "${jobscd}")
+		unset jobscd
+	done < <(_expand_glob "${JA_SPOOL}*.usr/${JA_USR_SCDJOBS}")
+	[ -z "${JA_DEBUG:-}" ] || \
+		_log 'pending jobs:\n' >&2
+	[ -z "${JA_DEBUG:-}" ] || \
+		_log "$(cat "${JA_TMP}jobs.lst")"
+
+	# start pending jobs,
+	#   subsystem: active, not held, non interactive
+	#   job queue: not held
+	jobs_active="$(wc -l < "${JA_TMP}jobs_active.lst")"
+	unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	while read -r sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms rest; do
+		[ -n "${sbsd}" ] || continue
+		if dummy="$(_read_option "JA_SBSD_STS" "${JA_SPOOL}${sbsd}.sbsd")" || \
+		dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${sbsd}.sbsd.attrs")" || \
+		[ "${sbs_typ}" = "0" ]; then
+			continue
+		fi
+		runprops=""
+		if [ -d /run/systemd/system ]; then
+			if ! cls_cgrp="$(awk -v class="${sbsd_class}" \
+			'$1 == class {print $2; rc=-1; exit} END{exit rc+1}' \
+			"${JA_CONF_CLASS}")"; then
+				_log "Error: invalid class of service ${sbsd_class}" \
+					"for subsystem description ${sbsd}."
+				continue
+			fi
+			if slice_dirs="$(awk '$1 == "cgroup" && $2 !~ "/systemd$" {
+			print $2; rc=-1}
+			END{exit rc+1}' < /proc/mounts)" && \
+			[ -n "$(find ${slice_dirs} \
+			-name "${cls_cgrp}.slice" -type d)" ]; then
+				runprops="$(awk -v class="${sbsd_class}" \
+				'$1 == class {for (i=4; i<=NF; i++)
+				if ($i ~ "^#")
+					break
+				else
+					printf " --property=" $i
+				exit}' \
+				"${JA_CONF_CLASS}")"
+			else
+				_log "Error: invalid systemd slice ${cls_cgrp}" \
+					"for class of service ${sbsd_class}."
+				continue
+			fi
+		else
+			if ! cls_cgrp="$(awk -v class="${sbsd_class}" \
+			'$1 == class {print $3; rc=-1; exit} END{exit rc+1}' \
+			"${JA_CONF_CLASS}")"; then
+				_log "Error: invalid class of service ${sbsd_class}" \
+					"for subsystem description ${sbsd}."
+				continue
+			fi
+		fi
+		[ ${sbsd_maxjobs} -gt 0 ] || sbsd_maxjobs=999
+		sbsd_actjobs="$(awk -v sbsd="${sbsd}" '$3 == sbsd {c++}
+			END{print c+0}' "${JA_TMP}jobs_active.lst")"
+		sbsd_maxjobs=$(( ${sbsd_maxjobs} - ${sbsd_actjobs} ))
+		if [ ${sbsd_maxjobs} -gt 0 ]; then
+			truncate -s 0 "${JA_TMP}jobs_sbsd.lst"
+			unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+			while read -r jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror rest ;do
+				[ -n "${jobq}" ] || continue
+				! dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")" || \
+					continue
+				grep -qswe "${jobq}" <<< "${jobqs_active}" || \
+					continue
+				[ ${jobq_maxjobs} -gt 0 ] || \
+					jobq_maxjobs=999
+				jobq_actjobs="$(awk -v jobq="${jobq}" '$4 == jobq {c++}
+					END{print c+0}' "${JA_TMP}jobs_active.lst")"
+				jobq_maxjobs=$(( ${jobq_maxjobs} - ${jobq_actjobs} ))
+				if [ ${jobq_maxjobs} -gt 0 ]; then
+					awk -v jobq="${jobq}" '$6 == jobq {print; exit}' "${JA_TMP}jobs.lst" | \
+						sort -k 1nr,1 -k 2n,2 | \
+						head --lines=${jobq_maxjobs} >> "${JA_TMP}jobs_sbsd.lst"
+				fi
+				unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
+			done < <(awk -v sbsd="${sbsd}" '$2 == sbsd {print}' "${JA_CONF_JOBQS}")
+			[ -z "${JA_DEBUG:-}" ] || \
+				_log 'subsystem jobs:\n'
+			[ -z "${JA_DEBUG:-}" ] || \
+				_log "$(cat "${JA_TMP}jobs_sbsd.lst")"
+
+			unset pty timejob job usr sbsd jobq job_dir
+			while read -r pty timejob job usr sbsd jobq job_dir; do
+				[ -n "${job}" ] || \
+					continue
+				[ -z "${JA_DEBUG:-}" ] || \
+					_log "Trying to start job ${job}.${usr}"
+
+				attrs="${job_dir}job.attrs"
+				test -s "${attrs}" || \
+					continue
+				pidfile="${job_dir}job.pid"
+
+				(if ! flock --exclusive --nonblock ${fd2}; then
+					_log "Error starting job '${job}.${usr}', pid file is locked."
+					continue
+				fi
+
+					pwd="$(_read_option "JA_PWD" "${attrs}")" || :
+					if [ -n "${JA_DEBUG:-}" ]; then
+						verbose="--verbose"
+					else
+						verbose="--quiet"
+					fi
+
+					_set_option "${attrs}" "JA_RC" "255"
+					rc=""
+					if [ ! -d "${pwd}" ]; then
+						_jobadmin_msg_job "${job}" "${usr}" "0" \
+							"Error: job's directory '${pwd}' does not exist"
+						_set_option "${attrs}" "JA_JOB_STS" "OUTQ"
+						_set_option "${attrs}" "JA_RC" "254"
+						continue
+					fi
+					_set_option "${attrs}" "JA_SBSTYP" "${sbs_typ}"
+					if dummy="$(_read_option "JA_TERM_ALLOC" "${attrs}")"; then
+						terms="$(ps a -o tty= | grep -swE 'tty1[3-9]|tty[2-9][0-9]' | sort --unique)"
+						# TODO detect the kernel limit for tty numbers
+						term="${JA_VT_INTER}"
+						while echo "${terms}" | grep -qswe "tty${term}"; do
+							term=$((${term}+1))
+						done
+						_log "Allocating terminal /dev/tty${term} for user ${usr}."
+						_set_option "${attrs}" "JA_JOB_TTY" "tty${term}"
+						cgexec="$(echo "${JA_CGEXEC_INTER}" | \
+							sed -e "\|@CGRP| s||${cls_cgrp}|g" \
+							-e "\|@RUNPROPS| s||${runprops}|g" \
+							-e "\|@JOB| s||${job}|g" \
+							-e "\|@TERM| s||${term}|g" \
+							-e "\|@USR| s||${usr}|g")"
+					else
+						_set_option "${attrs}" "JA_JOB_TTY" ""
+						cgexec="$(echo "${JA_CGEXEC}" | \
+							sed -e "\|@CGRP| s||${cls_cgrp}|g" \
+							-e "\|@RUNPROPS| s||${runprops}|g" \
+							-e "\|@JOB| s||${job}|g" \
+							-e "\|@USR| s||${usr}|g")"
+					fi
+					[ -n "${cgexec:-""}" ] || continue
+					_log "Starting job: '${job}.${usr}'."
+					${cgexec} &
+					flock --unlock ${fd2}
+					( printf '%s ' \
+						"${job}" "${usr}" \
+						"${sbsd}" "${jobq}" \
+						"${sbs_typ}" "0"
+					printf '\n' ) >> "${JA_TMP}jobs_active.lst"
+					[ -z "${JA_DEBUG:-}" ] || \
+						_log "Job cmd: '${cgexec}'."
+				) {fd2}< "$(_flock_lckfile "${pidfile}")"
+				unset pty timejob job usr sbsd jobq job_dir
+			done < <(sort -k 1nr,1 -k 2n,2 "${JA_TMP}jobs_sbsd.lst" | \
+				head --lines=${sbsd_maxjobs})
+		fi
+		unset sbsd sbsd_class sbsd_maxjobs sbs_typ sbsd_perms
+	done < "${JA_CONF_SBSDS}"
+
+	test ${jobs_active} != $(wc -l < "${JA_TMP}jobs_active.lst")
+}
+
+_jobadmin_wtrs_check() {
+	local outqs_active fd1
+	local wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+	local wtr_old usr_old prt_old
+	local wtr outq outpty datesplf splf job job_usr job_pid splf_attrs
+
+	# print spool files
+	# list active Output Queues
+	outqs_active=""
+	unset wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+	while read -r wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms rest; do
+		[ -n "${wtr}" ] || \
+			continue
+		if dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${wtr}.wtr.attrs")" || \
+		dummy="$(_read_option "JA_WTR_STS" "${JA_SPOOL}${wtr}.wtr")"; then
+			continue
+		fi
+		unset outq
+		for outq in $(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr}.wtr"); do
+			[ -n "${outq}" ] || \
+				continue
+			dummy="$(_read_option "JA_HLD" "${JA_SPOOL}${outq}.outq.attrs")" || \
+				outqs_active="${outqs_active:+"${outqs_active} "}${outq}/${wtr}"
+			unset outq
+		done
+		unset wtr wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+	done < "${JA_CONF_WTRS}"
+
+	truncate -s 0 "${JA_TMP}splfs_rdy.lst"
+	unset splf_scd
+	while read -r splf_scd; do
+		[ -s "${splf_scd}" ] || continue
+		unset splf
+		while read -r job splf; do
+			splf_attrs="$(dirname "${splf_scd}")/${job}.job/${splf}.splfa"
+			[ -s "${splf_attrs}" ] || continue
+			! dummy="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || continue
+			! dummy="$(_read_option "JA_HLD" "${splf_attrs}")" || continue
+
+			outpty="$(_read_option "JA_OUTPTY" "${splf_attrs}")" || outpty="3"
+			outq="$(_read_option "JA_OUTQ" "${splf_attrs}")" || continue
+			wtr="$(tr -s " " '\n' <<< "${outqs_active}" | \
+				sed -nre '\|^'${outq}'/(.*)| s||\1|p')"
+			[ -n "${wtr}" ] || continue
+			datesplf="$(_read_option "JA_DATERLS" "${splf_attrs}")" || datesplf=0
+			job_pid="$(sed -re '\|job-([[:digit:]]+)-.*| s||\1|' <<< "${splf}")"
+			splf="$(sed -re '\|job-[[:digit:]]+-(.*)| s||\1|' <<< "${splf}")"
+			job_usr="$(stat -c "%U" "${splf_attrs}")"
+			( printf '%s ' "${wtr}" "${outq}" \
+				"${outpty}" "${datesplf}" \
+				"${splf}" "${job}" "${job_usr}" "${job_pid}" \
+				"${splf_attrs}"
+			printf '\n' ) >> "${JA_TMP}splfs_rdy.lst"
+			unset splf
+		done < "${splf_scd}"
+		unset splf_scd
+	done < <(_expand_glob "${JA_SPOOL}*.usr/${JA_USR_SCDSPLFS}")
+
+	wtr_old=""
+	usr_old=""; prt_old=""
+	unset wtr outq outpty datesplf splf job job_usr job_pid splf_attrs
+	while read -r wtr outq outpty datesplf splf job job_usr job_pid splf_attrs; do
+		[ -n "${wtr}" ] || continue
+		if [ "${wtr_old}" != "${wtr}" ]; then
+			unset wtr1 wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms
+			read wtr1 wtr_prt wtr_eml wtr_action wtr_autostr wtr_perms rest < \
+				<(awk -v wtr="${wtr}" '$1 == wtr {print; exit}' "${JA_CONF_WTRS}")
+			prt="$(_read_option "JA_PRT" "${JA_SPOOL}${wtr}.wtr")" || \
+				continue
+			wtr_old="${wtr}"
+			usr_old=""; prt_old=""
+		fi
+		if [ "${usr_old}" != "${job_usr}" ] || \
+		[ "${prt_old}" != "${prt}" ]; then
+			usr_old="${job_usr}"
+			prt_old="${prt}"
+			printer="${prt}"
+			[ "${prt}" != "*" ] || \
+				printer="$(_sudo "${job_usr}" lpstat -d | awk '{print $NF}')"
+# 			jobs="$(lpstat -U "${job_usr}" -p "${printer}" -o | \
+# 				awk '$2 == "'${job_usr}'" {print $1}')"
+		fi
+
+		if [ "${printer}" != "none" ]; then
+			dataf="$(dirname "${splf_attrs}")/$(_read_option "JA_SPLF" "${splf_attrs}")"
+			if request="$(_sudo "${job_usr}" lp \
+			-o notify-recipient-uri=janotifier://${splf}.${job}.${job_usr}.${job_pid} \
+			-d "${printer}" "${dataf}" | \
+			awk '$0 ~ "^request id is" {s=-1; print $4} END{exit s+1}')"; then
+				message="Writer '${wtr}' is sending spool file '${splf}.${job}.${job_usr}.${job_pid}' to printer '${printer}'."
+				_log "${message}"
+				for usr in ${job_usr} $(_read_option "JA_SUDO_USR" \
+				"${splf_attrs}"); do
+					_jobadmin_msg_usr "${usr}" "${message}" &
+				done
+				_set_option "${splf_attrs}" "JA_DATESTR" "$(date +%s)"
+				_set_option "${splf_attrs}" "JA_REQUEST" "${request}"
+				_set_option "${splf_attrs}" "JA_SPLF_STS" "WTR"
+				_set_option "${splf_attrs}" "JA_WTR" "${wtr}"
+				_set_option "${splf_attrs}" "JA_WTR_EML" "${wtr_eml}"
+				_set_option "${splf_attrs}" "JA_WTR_ACTION" "${wtr_action}"
+				_set_option "${splf_attrs}" "JA_PRT" "${printer}"
+				_set_option "${splf_attrs}" "JA_CAUSE" "CAN"
+				usr_dir="$(_usr_dir "${usr}")"
+				[ ! -s "${usr_dir}${JA_USR_SCDSPLFS}" ] || \
+					printf '%s\n' "g/^${job} job-${job_pid}-${splf}$/d" 'w' | \
+					ed -s "${usr_dir}${JA_USR_SCDSPLFS}" 2> /dev/null || \
+					[ -z "${JA_DEBUG}" ] || \
+					eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
+				( if ! flock --exclusive --timeout 1 ${fd1}; then
+					_log "Error: 3 'splfs_wtr.lst' is locked."
+				else
+					( printf '%s ' "-" "${request}" \
+						"${printer}" "${job_usr}" \
+						"${splf_attrs}"
+					printf '\n' ) >> "${JA_TMP}splfs_wtr.lst"
+				fi
+				) {fd1}< "$(_flock_lckfile "${JA_TMP}splfs_wtr.lst")"
+			fi
+		fi
+		# TODO: send files via e-mail
+# 			if [ "${wtr_eml}" != "none" ] && \
+#			request="$(_sudo "${job_usr}" lp -d "${prt}" "${dataf}")"; then
+# 			fi
+		unset wtr outq outpty datesplf splf job job_usr job_pid splf_attrs
+	done < <(sort -k 1,1 -k 7,7 -k 3nr,3 -k 4n,4 "${JA_TMP}splfs_rdy.lst")
+	rm -f "${JA_TMP}splfs_rdy.lst"
+
+	sys_active_jobs=$((${sys_active_jobs} + \
+		$(awk '$1 !~ /stopped|hold/ {s++}
+		END{print s+0}' "${JA_TMP}splfs_wtr.lst")))
+	:
+}
+
+# run jobs that are waiting in non-interactive job queues
+_jobadmin_monitor() {
+	local pid \
+		usr delay pwr_option pwr_restart urgency \
+		sys_active_jobs terminal ent home idle_cpu
+
+	if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
+		# don't start new jobs when a pwrdwnsys is in process
+		if pid="$(_read_option "JA_PID" "${vars_pwrdwnsys}")" && \
+		kill -0 "${pid}" > /dev/null 2>&1; then
+			return 0
+		fi
+
+		if ! dummy="$(_read_option "JA_NOTIFIED" "${vars_pwrdwnsys}")"; then
+			_set_option "${vars_pwrdwnsys}" "JA_NOTIFIED" "1"
+			if usr="$(_read_option "JA_USR" "${vars_pwrdwnsys}")" && \
+			delay="$(_read_option "JA_DELAY" "${vars_pwrdwnsys}")" && \
+			pwr_option="$(_read_option "JA_OPTION" "${vars_pwrdwnsys}")" && \
+			pwr_restart="$(_read_option "JA_RESTART" "${vars_pwrdwnsys}")"; then
+				_systemd_inhibited && \
+					urgency="" || \
+					urgency=":2000"
+				_jobadmin_msg_allusrs "${usr}" \
+					"$(echo "Requested a ${pwr_option} system ${pwr_restart}," \
+					"${delay} seconds delayed")" \
+					"${urgency}"
+			fi
+		fi
+	fi
+
+	# find pending JOBQ jobs and submit processing
+	while _jobadmin_jobs_check; do
+		sleep 1
+	done
+
+	[ -z "${JA_PROCESS_WTR:-}" ] || \
+		_jobadmin_wtrs_check
+
+	# compute number of active jobs in non-control subsystems
+	grep -qswe 'IMMED' "${JA_TMP}pwrdwnsys.now" && \
+		sys_active_jobs=0 || \
+		sys_active_jobs="$(awk '$5 != "1" {c++} END{print c+0}' "${JA_TMP}jobs_active.lst")"
+
+	if [ -s "${JA_TMP}pwrdwnsys.now" ] && \
+	[ ${sys_active_jobs} -eq 0 ]; then
+		if sleep 1 && \
+		_systemd_inhibited; then
+			_pipe_daemon_write "_inhibit_watchdog" &
+			return 0
+		fi
+		# Option JA_XSAVER, only for KDE
+		: || if dummy="$(_read_option "JA_XSAVER" "${vars_pwrdwnsys}")"; then
+			while read -r usr terminal; do
+				ent="$(getent passwd "${usr}")" || continue
+				home="$(awk 'BEGIN{FS=":"}
+					{h=$6}
+					END{print h; exit system("test -d \""h"\"")}' \
+					<<< "${ent}")" || \
+					continue
+				if grep -qsxe 'Enabled=true' "${home}/.kde/share/config/kscreensaverrc"; then
+					DISPLAY="${terminal}"
+					if [ "$(_sudo "${usr}" ${JA_CMD_XSAVER})" = "false" ]; then
+						sys_active_jobs=$((${sys_active_jobs} + 1))
+						_log "pwrdwnsys: user '${usr}' is active in" \
+							"display '${terminal}' ."
+					fi
+				fi
+			done < <(who --writable | \
+				awk '$2 != "-" && $3 ~ "^:" {print $1 OFS $3}' | \
+				sort -k 2,2)
+			[ ${sys_active_jobs} -eq 0 ] || \
+				return 0
+		fi
+
+		# the system is idle?
+		if [ ${JA_CPU_IDLE:-0} -gt 0 ]; then
+			# the method of computing idle cpu time not shows active processes
+			# on modern computers,
+			# CPU is too much powerful and light processes consume almost nothing
+			#idle_cpu="$(top -bn3 | grep "Cpu(s)" | tail -n 1 | \
+				#sed -nre "\|.*,[[:blank:]]+([0-9]+)[,.][0-9]* id.*| s//\1/p")"
+			idle_cpu="$(vmstat 1 4 | awk 'NR > 3 {n++; m=m+$(NF-2)} END{print int(m/n)}')"
+			if [ ${idle_cpu} -lt ${JA_CPU_IDLE} ]; then
+				_log "pwrdwnsys: vmstat %idle cpu" \
+					"'${idle_cpu}' < '${JA_CPU_IDLE}'."
+				return 0
+			fi
+		fi
+
+		_jobadmin_pwroff &
+		_set_option "${vars_pwrdwnsys}" "JA_PID" "${!}"
+	fi
+	:
+}
+
+_jobadmin_pipe_daemon_read() {
+	local command fd1
+	local vars_pwrdwnsys
+	vars_pwrdwnsys="${JA_TMP}pwrdwnsys.attrs"
+	# loop forever
+	while :; do
+		( if ! flock --exclusive ${fd1}; then
+			_log "Error: '_jobadmin_monitor' is locked." # should never happen
+		else
+			_jobadmin_monitor
+		fi
+		) {fd1}< "$(_flock_lckfile "${JA_TMP}monitor")"
+
+		command="$(_pipe_pull "${JA_PIPE_DAEMON}")" && \
+			[ -n "${command}" ] || continue
+		case "${command}" in
+		_jobadmin_stop)
+			kill -TERM "$(cat "${JA_PIDFILE}")"
+			;;
+		_inhibit_watchdog)
+			_inhibit_watchdog &
+			;;
+		_strsbs:*) # don't fork this; it modifies the config files
+			_jobadmin_strsbs "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				"$(cut -f 3- -s -d ':' <<< "${command}")"
+			;;
+		_jobadmin) # normal message, new interval
+			:
+			;;
+		*)
+			_log "Invalid command received from the daemon pipe: ${command}"
+			;;
+		esac
+		_jobadmin_status || \
+			return 0
+	done
+}
+
+_jobadmin_daemon() {
+	local command fd1 usr pid
+
+	# permission for all new created objects
+	umask 002
+
+	_log "Daemon active."
+
+	# create directories
+	mkdir -p -m u=rwx,g=rx,o=rx "${JA_SPOOL}"
+	mkdir -p "${JA_PIDS}"
+	mkdir -p -m u=rwx,g=rx,o=rx "${JA_TMP}"
+
+	_enable_daemon_debug
+
+	[ -t 1 -o -p 1 ] || \
+		exec >> "${JA_LOG}" 2>&1
+
+	if [ ! -e "${JA_PIPE}" ]; then
+		touch "${JA_PIPE}"
+		chmod a=rw "${JA_PIPE}"
+	fi
+
+	if [ ! -e "${JA_PIPE_WTR}" ]; then
+		touch "${JA_PIPE_WTR}"
+		chmod a=rw "${JA_PIPE_WTR}"
+	fi
+
+	if [ ! -e "${JA_PIPE_DAEMON}" ]; then
+		touch "${JA_PIPE_DAEMON}"
+		chmod u=rw,g=rw,o= "${JA_PIPE_DAEMON}"
+	fi
+
+	if [ ! -f "${JA_TMP}notifier.splf" ]; then
+		touch "${JA_TMP}notifier.splf"
+		chmod a=rw "${JA_TMP}notifier.splf"
+	fi
+
+	_jobadmin_pipe_read &
+
+	_jobadmin_LoadConfig
+
+	[ -z "${JA_PROCESS_WTR:-}" ] || \
+		_jobadmin_wtrs_init "Yes"
+
+	[ -f "${JA_TMP}pwrdwnsys.attrs" ] || \
+		touch "${JA_TMP}pwrdwnsys.attrs"
+	[ -f "${JA_TMP}pwrdwnsys.now" ] || \
+		touch "${JA_TMP}pwrdwnsys.now"
+	setfacl --recursive --modify "group:powerdev:rw" \
+		$(_expand_glob "${JA_TMP}pwrdwnsys.*") || \
+		_log "Error: Can't set ACL's in" \
+			"device '$(df "${JA_TMP}pwrdwnsys.attrs" | \
+		awk 'NR == 2 {print $1}')'."
+
+	# stop, signal TERM,
+	trap '_jobadmin_stop "${LINENO}" "${BASH_COMMAND}"' EXIT
+
+	[ -z "${JA_PROCESS_WTR:-}" ] || \
+		_jobadmin_wtrs_monitor &
+	[ -z "${JA_PROCESS_WTR:-}" ] || \
+		_jobadmin_wtrs_interval &
+
+	# check permissions on user's directories,
+	# create them when non existent
+	_test_usr_dir $( set +o noglob
+		( ls -1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \
+		tr -s '\n' '\000' | \
+		xargs -r0 basename -s '.usr' )
+
+	# set traps
+	# interrupt, control C
+	trap ':' INT
+
+	_jobadmin_pipe_daemon_read
+	exit 0
+}
+
+# JOBCTL client
+# main procedure
+
+LNET_GETOPT_ALLVARS=""
+export LNET_GETOPT_ALLVARS
+getopt_result="$(printf '%s\n' "--exec v JA_EXEC
+-d,--daemon i JA_DO_DAEMON
+-h,--stop i JA_STOP
+-l,--log i JOBCTLLOG
+-s,--status i JA_STS
+-v,--verbose i VERBOSE
+-w,--waitflock v JA_WAITFLOCK
+-h,--help,-? i HELP" | getopt-sh "${@}")"
+
+eval ${getopt_result}
+
+# help or invalid
+remainder="${@}"
+if [ -n "${HELP:-}" -o -n "${remainder}" ]; then
+	[ -z "${remainder}" ] || \
+		_log "Invalid option '${remainder}'."
+	printf '%s\n' "${usage}" >&2
+	exit 0
+fi
+
+[ "${VERBOSE}" != "yes" ] || \
+	_log "Starting $0 with options ${@}."
+
+[ -n "${JA_DAEMON:="$(which "${0}")"}" ]
+
+# when in daemon mode, a configuration is needed
+if [ -n "${JA_DO_DAEMON:-}" ]; then
+	if [ -z "${JA_CONF:-}" ]; then
+		_log "In daemon mode we must specify a configuration file."
+		exit 1
+	fi
+fi
+
+JA_LANGUAGE=C
+
+[ ! -s "${JA_CONF:-}" ] || \
+	. "${JA_CONF}"
+
+# screen
+if [ -n "${JA_EXEC:-}" ]; then
+	_jobadmin_exec "$(cut -f1 -d '.' <<< "${JA_EXEC}")" \
+		"$(cut -f2 -d '.' <<< "${JA_EXEC}")"
+	exit 0
+fi
+
+# status
+if [ -n "${JA_STS:-}" ]; then
+	_jobadmin_status
+	exit 0
+fi
+
+# stop daemon
+if [ -n "${JA_STOP:-}" ]; then
+	if _jobadmin_status; then
+		_log "Submitting the request to the daemon."
+		_pipe_daemon_write "_jobadmin_stop"
+	fi
+	exit 0
+fi
+
+# daemon mode
+if [ -n "${JA_DO_DAEMON:-}" ]; then
+	printf '%s\n' "${$}" > "${JA_PIDFILE}"
+
+	_jobadmin_daemon
+	_log "Daemon stopped."
+	exit 0
+fi
+
+# wait for file lock
+if [ -n "${JA_WAITFLOCK:-}" ]; then
+	_jobadmin_waitflock "${JA_WAITFLOCK}"
+	exit 0
+fi
+:

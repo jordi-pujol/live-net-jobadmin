@@ -1,0 +1,71 @@
+#!/usr/bin/make -f
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+BIN := $(notdir $(wildcard bin/*))
+LIB := $(notdir $(wildcard lib/*))
+SBIN := $(notdir $(wildcard sbin/*))
+DEBIAN := $(notdir $(wildcard debian/*init) $(wildcard debian/*default) $(wildcard debian/*post*) $(wildcard debian/*pre*))
+OTHERS := $(notdir $(wildcard others/01*))
+
+TEMPLATES	:= $(wildcard debian/*.in)
+AUTOGEN		:= $(patsubst %.in,%,$(TEMPLATES))
+COMPLETIONS := $(notdir $(wildcard bash-completion.d/*))
+
+.PHONY: binary binary-arch binary-indep build clean install
+binary binary-arch binary-indep build clean install:
+	dh $@ --parallel --with systemd,bash-completion
+
+.PHONY: autogen prepare
+autogen: $(AUTOGEN)
+prepare: autogen
+
+# Generating control files
+%:: %.in
+	$(info generating $< $@)
+	@bash $< > $@
+
+override_dh_auto_configure: prepare
+
+override_dh_clean:
+	dh_clean
+	rm -f $(AUTOGEN)
+	rm -rf bash-completion.d/
+
+# force daemon install for sysv,
+# because it seems that dh_installinit does not work when there are no 
+# daemons in the main package
+override_dh_installinit:
+	dh_installinit --name=jobadmind
+
+override_dh_auto_test: $(BIN:%=bin-%) $(LIB:%=lib-%) $(SBIN:%=sbin-%) $(DEBIAN:%=debian-%) $(OTHERS:%=others-%) $(COMPLETIONS:%=completion-%)
+
+bin-%:
+	$(info checking $* ...)
+	@bash -n bin/$*
+	-@checkbashisms -f bin/$*
+
+lib-%:
+	$(info checking $* ...)
+	@bash -n lib/$*
+	-@checkbashisms -f lib/$*
+
+sbin-%:
+	$(info checking $* ...)
+	@bash -n sbin/$*
+	-@checkbashisms -f sbin/$*
+
+debian-%:
+	$(info checking $* ...)
+	@bash -n debian/$*
+	-@checkbashisms -f debian/$*
+
+others-%:
+	$(info checking $* ...)
+	@bash -n others/$*
+	-@checkbashisms -f others/$*
+
+completion-%:
+	$(info checking bash-completion $* ...)
+	@bash -n bash-completion.d/$*
+	-@checkbashisms -f bash-completion.d/$*

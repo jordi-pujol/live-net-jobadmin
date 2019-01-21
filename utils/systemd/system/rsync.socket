@@ -1,0 +1,21 @@
+## live-net-initramfs - System Configuration Components
+##
+## live-net-initramfs contains the components that configure a live system during
+## the boot process (late userspace).
+##
+## This is the systemd service for live-net-initramfs.
+
+# rsync.service is already included in package rsync
+
+[Unit]
+Description=rsync daemon socket
+After=local-fs.target network.target
+ConditionPathExists=/etc/rsyncd.conf
+Conflicts=rsync.service
+
+[Socket]
+ListenStream=873
+Accept=yes
+
+[Install]
+WantedBy=network-online.target

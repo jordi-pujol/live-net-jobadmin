@@ -1,0 +1,7 @@
+# /etc/cron.d/jobadmin: crontab entries for the jobadmin package
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+#@reboot	root	sleep 5 ; [ ! -s /var/tmp/jobadmin.d/pwrdwnsys.now ] || pwrdwnsys --option cancel --norlssbs
+@reboot	root	sleep 5 ; pwrdwnsys --option cancel --rlssbs

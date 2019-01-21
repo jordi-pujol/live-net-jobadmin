@@ -1,0 +1,96 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# clroutq
+
+_clroutq_options="JA_OUTQ pr@
+JA_SPLFACTION pr@
+JA_SPLF_STSL pr@
+JA_USRL pr@
+JA_DAYSOLD pr"
+
+_clroutq() {
+	local splf splf_attrs dir dataf
+	local job usr job_pid found
+	local files sts
+
+	found=""
+
+	JA_CMD_CMD="$(tr '[:upper:]' '[:lower:]' <<< "${JA_SPLFACTION}")splf"
+
+	_usr_notify "Output queue '${JA_OUTQ}', deleting spool files."
+	unset splf_attrs
+	while read splf_attrs; do
+		[ -s "${splf_attrs}" ] || continue
+		dir="$(dirname "${splf_attrs}")"
+		job="$(basename "${dir}" ".job")"
+		usr="$(stat -c "%U" "${splf_attrs}")"
+		_test_rw "${dir}" && \
+			_test_rw "${splf_attrs}" || \
+			continue
+		[ "$(_read_option "JA_OUTQ" "${splf_attrs}")" = "${JA_OUTQ}" ] || \
+			continue
+		if [ "${JA_SPLF_STSL}" != "ALL" ]; then
+			sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || \
+				sts="RDY"
+			# ! _read_option "JA_HLD" "${splf_attrs}" > /dev/null || \
+			#	splf_sts="${sts}/HLD"
+			grep -qswe "${sts}" <<< "${JA_SPLF_STSL}" || \
+				continue
+		fi
+
+		job_pid="$(basename "${splf_attrs}" | \
+			sed -re '\|job-([[:digit:]]+)-.*| s||\1|')"
+		splf="$(basename "${splf_attrs}" | \
+			sed -re '\|job-[[:digit:]]+-(.*)\.splfa| s||\1|')"
+
+		# don't delete saved spool files
+		if [ "${JA_CMD_CMD}" = "dltsplf" ] && \
+		dummy="$(_read_option "JA_SAVED" "${splf_attrs}")"; then
+			_usr_notify "Warning: spool file '${splf}.${job}.${usr}.${job_pid}' is saved."
+			found="Warning"
+			continue
+		fi
+
+		[ -n "${found}" ] || \
+			found="Yes"
+		JA_CMD_ARGS=()
+		_options_reuse "${JA_CMD_CMD}" \
+			"JA_SPLF=${splf}" \
+			"JA_JOB=${job}" \
+			"JA_USR=${usr}" \
+			"JA_PID=${job_pid}"
+		_cmd_exec_background || \
+			found="Warning"
+
+		unset splf_attrs
+	done < <(_find_jobs_files "${JA_USRL}" "*.splfa" "${JA_DAYSOLD}")
+
+	_usr_notify "Output queue '${JA_OUTQ}' cleared."
+} # clroutq

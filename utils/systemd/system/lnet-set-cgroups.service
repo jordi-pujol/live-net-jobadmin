@@ -1,0 +1,27 @@
+## live-net-initramfs - System Configuration Components
+##
+## live-net-initramfs contains the components that configure a live system during
+## the boot process (late userspace).
+##
+## This is the systemd service for live-net-initramfs.
+
+
+[Unit]
+Description=live-net-initramfs contains the components that configure a live system during the boot process (late userspace).
+Documentation=man:live-net-initramfs
+DefaultDependencies=no
+ConditionKernelCommandLine=boot=lnet
+Conflicts=shutdown.target
+After=slices.target
+Before=network.target syslog.target local-fs.target remote-fs.target
+JobTimeoutSec=5s
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/lnet-set-cgroups start
+Slice=service-server.slice
+RemainAfterExit=yes
+
+[Install]
+WantedBy=basic.target
+RequiredBy=network.target syslog.target local-fs.target remote-fs.target

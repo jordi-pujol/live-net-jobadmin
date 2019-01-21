@@ -1,0 +1,211 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# This is a custom downloader for FlashGot, the Firefox plugin
+#
+# It will choose the best downloader for every URL type
+# curl is preferred for all types except aria2c for magnet or bittorrent;
+# force aria2c for magnetic or bittorrent, is the only that does it.
+#
+# Implements multipart download for curl and wget.
+#   curl performs well and works without flaws,
+#   but downloading with wget is more complicated, in development.
+# And a method to preserve integrity when downloading partial
+# flv files (in development).
+#
+# FlashGot configuration:
+#
+# Executable path:
+# /usr/bin/jobadmin-flashgot
+#
+# Parameters layout:
+# --referer [REFERER] /r/n
+# --cookie [COOKIE] /r/n
+# --folder [FOLDER] /r/n
+# --post [POST] /r/n
+# --ulist [ULIST] /r/n
+# --ufile [UFILE] /r/n
+# --cfile [CFILE] /r/n
+# --fname [FNAME] /r/n
+# --url [URL] /r/n
+# [ --dwnldr aria2c|curl|wget|youtube-dl /r/n ]
+
+set -o errexit -o noglob -o nounset
+
+DEBUG=""
+if [ -n "${DEBUG:-}" ]; then
+	exec >> "$(mktemp /tmp/jobadmin-flashgot-XXXX.txt)" 2>&1
+	set -x
+	echo "${@}" "" >&2
+fi
+
+_jafg_dup_file() {
+	local f fl="${1}"
+	[ -s "${fl}" ] || \
+		return 0
+	f="$(mktemp "${JAFG_TMPDIR}$(basename "${fl}")-XXXXX")"
+	cp "${fl}" "${f}"
+	echo "${f#*"${FOLDER}"}"
+}
+
+_jafg_mk_file() {
+	local f url="${1}"
+	[ -n "${url}" ] || \
+		return 0
+	f="$(mktemp "${JAFG_TMPDIR}$(basename "${fl}")-XXXXX")"
+	printf '%s\n' "${url}" > "${f}"
+	echo "${f#*"${FOLDER}"}"
+}
+
+_jafg_new_job() {
+	job="$(sbmjob --jobd dwnld --jobq "${JA_DWNLD_JOBQ}" \
+		--hold --job ja_flashgot \
+		--pwd "${FOLDER}" --joinlogs --cmd true 2>&1 | \
+		sed -rne "\|.*submitted job '(.*)' to queue.*| s||\1|p")"
+	[ -n "${job}" ] || \
+		return 1
+	job_dir="${JA_USR_DIR}${job}.job/"
+	[ -d "${job_dir}" ] || \
+		return 1
+	JAFG_TMPDIR="${FOLDER}tmp/"
+	mkdir -p "${JAFG_TMPDIR}"
+}
+
+_jafg_job_simple_cmd() {
+	chgjob "${job}" --cmd "${JA_DWNLDR}" "${@}"
+}
+
+_jafg_clean() {
+	echo "${1}" | sed -re '\|/r/n$| s|||'
+}
+
+_jafg_job_cmd() {
+	cat <<EOF
+#!/bin/bash
+
+. "${JA_LIB}libjobadmin"
+
+. "${JA_LIB}libflashgot"
+
+set -o errexit
+
+[ ! -s "/etc/jobadmin/jobadmin-flashgot.rc" ] || \\
+	. "/etc/jobadmin/jobadmin-flashgot.rc"
+
+[ ! -s "${JA_USR_DIR}jobadmin-flashgot.rc" ] || \\
+	. "${JA_USR_DIR}jobadmin-flashgot.rc"
+
+URL='${URL}'
+REFERER='${REFERER}'
+COOKIE='${COOKIE}'
+FOLDER='${FOLDER}'
+POST='${POST}'
+ULIST='${ULIST}'
+UFILE='${UFILE}'
+CFILE='${CFILE}'
+FNAME='${FNAME}'
+${JA_DWNLDR:+"$(echo "JA_DWNLDR='${JA_DWNLDR}'")"}
+
+EOF
+
+	cat <<'EOF'
+DEBUG='${DEBUG:-}'
+JA_DWNLDR="${JA_DWNLDR:-}"
+ARIA2C_SPLIT="${ARIA2C_SPLIT:-}"
+CURL_SPLIT="${CURL_SPLIT:-}"
+WGET_SPLIT="${WGET_SPLIT:-}"
+# BitTorrent/Metalink Options
+# --select-file=1-5,8,9
+ARIA2C_SELECT="${ARIA2C_SELECT:-}"
+ARIA2C_UPNP_RANGE="${ARIA2C_UPNP_RANGE:-}"
+#ARIA2C_DHT="y"
+#CURL_PART_PERCENT="50-" # "-50" "25-75"
+CURL_PART_PERCENT=""
+
+_jobadmin_flashgot
+:
+EOF
+}
+
+. "/etc/default/jobadmind"
+
+URL=""
+REFERER=""
+COOKIE=""
+FOLDER=""
+POST=""
+ULIST=""
+UFILE=""
+CFILE=""
+FNAME=""
+JA_DWNLDR=""
+
+[ ! -s "/etc/jobadmin/jobadmin-flashgot.rc" ] || \
+	. "/etc/jobadmin/jobadmin-flashgot.rc"
+
+JA_USR_DIR="$(readlink -f "${JA_SPOOL}${USER}.usr")/"
+
+[ ! -s "${JA_USR_DIR}jobadmin-flashgot.rc" ] || \
+	. "${JA_USR_DIR}jobadmin-flashgot.rc"
+
+while [ -n "${1:-}" ]; do
+	case "${1}" in
+	"--url") URL="$(_jafg_clean "${2}")"; shift;;
+	"--referer") REFERER="$(_jafg_clean "${2}")"; shift;;
+	"--cookie") COOKIE="$(_jafg_clean "${2}")"; shift;;
+	"--folder") FOLDER="$(_jafg_clean "${2}")/"; shift;;
+	"--post") POST="$(_jafg_clean "${2}")"; shift;;
+	"--ulist") ULIST="$(_jafg_clean "${2}")"; shift;;
+	"--ufile") UFILE="$(_jafg_clean "${2}")"; shift;;
+	"--cfile") CFILE="$(_jafg_clean "${2}")"; shift;;
+	"--fname") FNAME="$(_jafg_clean "${2}")"; shift;;
+	"--dwnldr") JA_DWNLDR="$(_jafg_clean "${2}")"; shift;;
+	esac
+	shift
+done
+
+[ -n "${URL}" ] && \
+[ -d "${FOLDER}" ] || \
+	exit 1
+
+JA_DWNLD_JOBQ="${JA_DWNLD_JOBQ:-"dwnld"}"
+
+_jafg_new_job || \
+	exit 1
+
+CFILE="$(_jafg_dup_file "${CFILE}")"
+[ -s "${UFILE}" ] && \
+	UFILE="$(_jafg_dup_file "${UFILE}")" || \
+	UFILE="$(_jafg_mk_file "${URL}")"
+
+_jafg_job_cmd > "${job_dir}job.cmd"
+
+[ -z "${JA_RLSJOB:-}" ] || \
+	rlsjob "${job}"
+:

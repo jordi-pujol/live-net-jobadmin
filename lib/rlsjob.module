@@ -1,0 +1,71 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# release a job
+
+_rlsjob_usage="Release Job
+
+rlsjob -j|--job 'JOBNAME'
+
+- release a job"
+
+_rlsjob_options="JA_JOB pr@
+JA_USR"
+
+_rlsjob() {
+	local sts hld attrs fd1
+
+	attrs="${JA_JOB_DIR}job.attrs"
+
+	if ! _test_rw "${attrs}"; then
+		_usr_notify "Error: Not authorized to manage job '${JA_JOB}.${JA_USR}'."
+		return 1
+	fi
+
+	sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
+		sts="JOBQ"
+	if hld="$(_read_option "JA_HLD" "${attrs}")"; then
+		_set_option "${attrs}" "JA_HLD" ""
+	else
+		[ "${sts}" = "OUTQ" ] || \
+			_usr_notify "Warning: job '${JA_JOB}.${JA_USR}' is already released, current status '${sts}'."
+	fi
+
+	if flock --shared --nonblock ${fd1} && \
+	_set_option "${attrs}" "JA_JOB_STS" ""; then
+		if [ "${sts}" = "OUTQ" ]; then
+			_usr_notify "Resubmitting job '${JA_JOB}.${JA_USR}'."
+		else
+			_usr_notify "Releasing job '${JA_JOB}.${JA_USR}', current status '${sts}'."
+		fi
+	fi {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+
+	_usr_scdjobs_add
+	_pipe_write "_jobadmin" || :
+} # rlsjob

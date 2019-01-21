@@ -1,0 +1,23 @@
+## live-net-initramfs - System Configuration Components
+##
+## live-net-initramfs contains the components that configure a live system during
+## the boot process (late userspace).
+##
+## This is the systemd service for live-net-initramfs.
+
+[Unit]
+Description=Configure locales in a live system
+DefaultDependencies=no
+Conflicts=shutdown.target
+#Before=systemd-localed.service lnet-services.service lnet-xorgconfig.service
+Before=systemd-vconsole-setup.service systemd-localed.service
+ConditionKernelCommandLine=boot=lnet
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/lnet-locales start
+Slice=system-ctl.slice
+
+[Install]
+WantedBy=basic.target

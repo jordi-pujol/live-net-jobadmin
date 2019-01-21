@@ -1,0 +1,9 @@
+#!/bin/bash
+
+! grep -qse "^# BEGIN jobadmin" /etc/bash.bashrc || \
+	printf '%s\n' '/# BEGIN jobadmin/,/# END jobadmin/d' 'w' | \
+	ed -s /etc/bash.bashrc 2> /dev/null || :
+
+update-icon-caches /usr/share/icons/jobadmin/ || :
+
+#DEBHELPER#

@@ -1,0 +1,336 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+#
+
+# test validity
+if [ ! -s "/etc/default/jobadmind" ]; then
+	printf '%s\n' "Error: Default file '/etc/default/jobadmind' not found." >&2
+	exit 1
+fi
+
+. "/etc/default/jobadmind"
+. "${JA_LIB}libjobadmin"
+
+if [ -f "${JA_CONF:-""}" ]; then
+	. "${JA_CONF}"
+fi
+
+JA_DEBUG="${JA_DEBUG_MODULES:-}"
+if [ -n "${JA_DEBUG:-}" ]; then
+	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
+	exec {bash_xtracefd}> "$(mktemp /tmp/jobadmin-XXX.xtrace)"
+	BASH_XTRACEFD=${bash_xtracefd}
+	set -x
+else
+	bash_xtracefd=2
+fi
+
+JA_LANGUAGE="${LANGUAGE:-"${LANG:-}"}"
+export LANGUAGE=C LC_ALL=""
+
+# JA_MESG should not be exported,
+# is valid only for this execution
+JA_MESG=""
+# mesg is enabled on terminal if group has write rights
+if tty="$(tty 2> /dev/null)" && \
+[ $(( "0$(stat -c %a "${tty}")" & "0020" )) -ne 0 ]; then
+	chmod g-w "$(tty)"
+	JA_MESG="y"
+fi
+
+[ -e "${JA_PIPE_DAEMON}" ] || exit 1
+
+function _finish {
+	local parent_lineno="${1:-"0"}"
+	local cmd="${2:-}"
+	if [ "${parent_lineno}" -gt 1 ]; then
+		echo "Error on command '${cmd}' near line ${parent_lineno}." >&2
+	fi
+	# exit
+	trap - EXIT
+	[ -z "${JA_MESG}" ] || \
+		chmod g+w "$(tty)" || :
+}
+# stop, signal TERM,
+trap '_finish "${LINENO}" "${BASH_COMMAND}"' EXIT
+
+# main procedure
+JA_USRACT="$(id -un)"
+if ! _usr_valid "${JA_USRACT}" || \
+! _usr_dsc "${JA_USRACT}"; then
+	printf '%s\n' "Error: invalid user '${JA_USRACT}'" >&2
+	exit 1
+fi
+
+JA_CMD_PID="${$}"
+JA_MODULE="$(basename "${0}")"
+if [ "${JA_MODULE}" = "jobadmin" ] && \
+[ "${#}" = 0 ]; then
+	set -- "jobmenu"
+fi
+module="${JA_LIB}${JA_MODULE}.module"
+if [ ! -s "${module}" ] || \
+! _cmd_dsc "${JA_MODULE}" ; then
+	_usr_notify "Error: Function '${JA_MODULE}' does not exist." "${JA_USRACT}"
+	exit 1
+fi
+
+. "${module}"
+JA_MODULE_OBJ="${JA_CMD_OBJ}"
+JA_MODULE_NAME="${JA_CMD_NAME}"
+
+JA_JOB=""; JA_PID=""; JA_JOBQ=""; JA_SPLF=""; JA_OUTQ=""; JA_PWD=""
+JA_JOB_STS=""; JA_JOB_STS=""; JA_HELP=""
+
+if ! JA_OPTIONS="$(_options_module "${JA_MODULE}")"; then
+	_usr_notify "$(_usage 2>&1)" "${JA_USRACT}"
+	exit 1
+fi
+
+if [ -n "${JA_HISTORY}" ]; then
+	HISTFILE=~/.bash_history
+	# ignoreboth is shorthand for ignorespace and ignoredups
+	HISTCONTROL=ignoreboth:erasedups
+	[ -e "${HISTFILE}" ] || \
+		> "${HISTFILE}"
+fi
+
+# default values for command options
+options_getopt="$(_options_getopt "${JA_OPTIONS}" "${JA_MODULE}")"
+case "${JA_MODULE}" in
+jobadmin)
+	LNET_GETOPT_ALLVARS=""
+	;;
+*)
+	LNET_GETOPT_ALLVARS="Yes"
+	;;
+esac
+
+_write_command() {
+	_usr_notify "Command: ${JA_MODULE} $(_print_cmd "${@}")" \
+		"${JA_USRACT}"
+}
+
+export LNET_GETOPT_ALLVARS
+if ! result="$(getopt-sh "${@}" <<< "${options_getopt//@/$'\n'}")"; then
+	if [ -n "${JA_CMD_VERIFY:-}" ]; then
+		grep -qse "^JA_ASSIST=.*Yes" <<< "${result}" || \
+			result="${result}"$'\n'"JA_ASSIST='Yes'"
+	elif ! grep -qsEe "^(JA_ASSIST|JA_HELP)=.*Yes" <<< "${result}"; then
+		_write_command "${@}"
+		_usr_notify "Error in command: $(_getopt_errors "${result}")"$'\n'
+		_usage
+		exit 1
+	fi
+fi
+
+if grep -qse "^JA_HELP=.*Yes" <<< "${result}"; then
+	_usage
+	exit 0
+fi
+
+if [ "${JA_CMD_TERMINAL}" -gt 1 ] && \
+! _terminal_available; then
+	_usr_notify "Error: Function '${JA_MODULE}' only works in a terminal." "${JA_USRACT}"
+	exit 1
+fi
+
+if grep -qse "^JA_ASSIST=.*Yes" <<< "${result}"; then
+	_write_command "${@}"
+	! grep -qse "^LNET_GETOPT_ERR=.*Yes" <<< "${result}" || \
+		_usr_notify "Error in command: $(_getopt_errors "${result}")"$'\n'
+	exec jobadmin "${JA_MODULE}" \
+	$( k=0
+	for arg in "${@}"; do
+		if [ $k = 0 ] && \
+		( [ "${arg}" = "-a" ] || [ "${arg}" = "--assist" ] ); then
+			k=1
+			continue
+		elif [ $k = 1 ]; then
+			k=2
+			if grep -qsiwe "${arg}" <<< "true|t|yes|y|1"; then
+				continue
+			fi
+		fi
+		_print_param "${arg}"
+		printf ' '
+	done )
+	exit 0
+fi
+
+_write_command "${@}"
+
+eval ${result}
+remainder="${@}"
+remainder_count="${#}"
+
+if [ -n "${JA_JOB:+${JA_JOB//[^.]/}}" ]; then
+	if [ -z "${JA_USR}" ] && \
+	[ -z "${JA_PID}" ]; then
+		JA_PID="${JA_PID:-"$(cut -f 3 -s -d '.' <<< "${JA_JOB}")"}"
+		JA_USR="${JA_USR:-"$(cut -f 2 -s -d '.' <<< "${JA_JOB}")"}"
+		JA_JOB="$(cut -f 1 -d '.' <<< "${JA_JOB}")"
+	else
+		_usr_notify "Error: Invalid job name."
+		exit 1
+	fi
+fi
+
+if [ -n "${JA_MSGQ:+${JA_MSGQ//[^.]/}}" ]; then
+	if [ -z "${JA_USR}" ]; then
+		JA_USR="${JA_USR:-"$(cut -f 2 -s -d '.' <<< "${JA_MSGQ}")"}"
+		JA_MSGQ="$(cut -f 1 -d '.' <<< "${JA_MSGQ}")"
+	else
+		_usr_notify "Error: Invalid message queue name."
+		exit 1
+	fi
+fi
+
+if [ -n "${JA_OUTQL:-""}" ]; then
+	! grep -qsiwe "all" <<< "${JA_OUTQL}" || \
+		JA_OUTQL="$(cat "${JA_TMP}outqs.lst")"
+	JA_OUTQL="$(sort --unique  <<< "${JA_OUTQL//[^[:alnum:]_]/$'\n'}" | \
+		_comma_separated)"
+fi
+if [ -n "${JA_USRL:-""}" ]; then
+	! grep -qswe "current" <<< "${JA_USRL}" || \
+		JA_USRL="${JA_USRL//current/${JA_USRACT}}"
+	! grep -qsiwe "all" <<< "${JA_USRL}" || \
+		JA_USRL="$(cat "${JA_TMP}users.lst")"
+	JA_USRL="$(sort --unique  <<< "${JA_USRL//[^[:alnum:]_]/$'\n'}" | \
+	_comma_separated)"
+fi
+if [ -n "${JA_USR:-""}" ]; then
+	! [ "${JA_USR}" = "current" ] || JA_USR="${JA_USRACT}"
+else
+	JA_USR="${JA_USRACT}"
+fi
+if [ -n "${JA_WTRM:-""}" ]; then
+	! grep -qsiwe "all" <<< "${JA_WTRM}" || \
+		JA_WTRM="-,$(cat "${JA_TMP}rwtrs.lst")"
+	JA_WTRM="$(sort --unique <<< "${JA_WTRM//[^[:alnum:]_]/$'\n'}" | \
+	_comma_separated)"
+fi
+
+if [ -n "${JA_COMMAND:-}" ] && \
+[ ! -s "${JA_LIB}${JA_COMMAND}.module" ]; then
+	_usr_notify "Error: Invalid jobadmin command ${JA_COMMAND}" "${JA_USRACT}"
+	exit 1
+fi
+ 
+# help or invalid
+if [ "${JA_MODULE}" = "jobadmin" ] && \
+[ "${JA_HELP}" = "Yes" ]; then
+	_usage "${JA_COMMAND:-}"
+	exit 0
+fi
+
+if ! _usr_valid "${JA_USR}"; then
+	printf '%s\n' "Error: invalid user '${JA_USR}'." >&2
+	exit 1
+fi
+
+JA_USR_DIR="$(_usr_dir "${JA_USR}")"
+_jobadmin_env "${JA_USR}" "${JA_USR_DIR}"
+
+JA_USRACT_SUDO=""
+JA_USRACT_DIR=""
+if [ "${JA_USR}" = "${JA_USRACT}" ]; then
+	[ -z "${SUDO_USER:-""}" ] || \
+	[ "${SUDO_USER}" = "${JA_USRACT}" ] || \
+		JA_USRACT_SUDO="${SUDO_USER}"
+else
+	JA_USRACT_SUDO="${JA_USRACT}"
+	JA_USRACT_DIR="$(_usr_dir "${JA_USRACT}")"
+	_jobadmin_env "${JA_USRACT}" "${JA_USRACT_DIR}"
+fi
+
+if [ "${JA_USR}" = "${JA_USRACT}" ]; then
+	JA_USR_GRP="$(id -gn)"
+else
+	JA_USR_GRP="${JA_USR_GROUP}"
+fi
+
+cmd_index=0
+
+# functions do not allow any additional parameter
+if [ "${JA_MODULE}" != "jobadmin" -a -n "${remainder}" ]; then
+	_usage
+	exit 1
+fi
+
+case "${JA_MODULE}" in
+jobadmin)
+	:
+	;;
+sbmjob)
+	if [ "${JA_USR}" != "$(id -un)" ] && \
+	! id -Gn | grep -qswe "root"; then
+		_usr_notify "Error: Not authorized to submit jobs for user '${JA_USR}'." \
+			"${JA_USRACT}"
+		exit 1
+	fi
+	;;
+*) # other functions
+	if [ -n "${JA_JOB}" ]; then
+		_job_canonize_name
+		JA_JOB_DIR="$(_job_exist)" || \
+			exit 1
+	fi
+
+	[ -z "${JA_PID}" ] || \
+		JA_PID="$(_job_exist_exec)" || \
+			exit 1
+
+	if [ -n "${JA_SPLF}" ]; then
+		[ -n "${JA_PID}" ] || \
+			JA_PID="$(_job_exist_exec)" || \
+				exit 1
+		JA_SPLF_ATTRS="${JA_JOB_DIR}job-${JA_PID}-${JA_SPLF}.splfa"
+		if [ ! -s "${JA_SPLF_ATTRS}" ]; then
+			_usr_notify "Error: Spool file '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}' not found."
+			exit 1
+		fi
+	fi
+	;;
+esac
+
+[ -z "${DISPLAY:-}" ] || \
+	WID="$(_window_active)" || :
+
+export JA_FD_SAVE=""
+
+rc="0"
+_${JA_MODULE} "${@}" || \
+	rc="${?}"
+
+_finish
+
+exit "${rc}"

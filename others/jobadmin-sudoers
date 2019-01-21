@@ -1,0 +1,7 @@
+# User privilege specification
+
+Runas_Alias USERS = %users
+
+%adm ALL=(ALL) NOPASSWD: /bin/kill
+
+%adm ALL=(USERS) NOPASSWD: /bin/mkdir,/usr/bin/screen,/usr/bin/touch,/usr/bin/konsole

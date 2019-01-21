@@ -1,0 +1,6 @@
+bin/*				/usr/bin
+sbin/*				/usr/sbin
+lib/*				/usr/lib/jobadmin
+conf/*						/etc/jobadmin.d
+others/jobadmin-sudoers		/etc/sudoers.d
+others/jobadmin*.png		/usr/share/icons/jobadmin

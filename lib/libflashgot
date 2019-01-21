@@ -1,0 +1,493 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+_finish() {
+	trap - ERR EXIT
+	[ -z "${listen_port:-}" ] || \
+		/usr/bin/lnet-upnpclient port-release "${listen_port}"
+}
+
+_listen_port_watchdog() {
+	local listen_port="${1}"
+	local ppid="${2}"
+	[ -n "${listen_port:-}" ] || \
+		return 0
+	while kill -0 "${ppid}"; do
+		sleep 60 &
+		wait "${!}" || \
+			return 0
+		/usr/bin/lnet-upnpclient port-status "${listen_port}" || \
+			/usr/bin/lnet-upnpclient port-get "${listen_port}"
+	done
+}
+
+_jafg_aria2c_flv() {
+	local flv start
+	start="$(echo "${URL}" | sed -re '\|.*flv.*start=([[:digit:]]+)$| s||\1|')"
+	stype="$(echo "${URL}" | sed -re '\|.*flv.*(.start=)[[:digit:]]+$| s||\1|')"
+	flv="$(basename -s '.flv' "${FNAME}")"
+	url="$(echo "${URL}" | sed -re '\|(.*)'"${stype}"'[[:digit:]]+$| s||\1|')"
+
+	ranges="0-4096 ${start}-$((1024*1024*1024))"
+
+	i=0
+	for range in ${ranges}; do
+		i=$(($i+1))
+		start="$(echo "${range}" | cut -f1 -s -d '-')"
+		end="$(echo "${range}" | cut -f2 -s -d '-')"
+		flv1="${flv}_${i}.flv"
+		if [ ${start} -gt 0 ]; then
+			url1="${url}${stype}${start}"
+		else
+			url1="${url}"
+		fi
+		"${JA_DWNLDR}" --continue \
+			--file-allocation=none \
+			--split=1 \
+			--check-integrity=true \
+			--no-netrc=true \
+			--max-connection-per-server=4 \
+			--seed-time=0 \
+			--max-tries=8 \
+			-d "${FOLDER}" \
+			${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+			${CFILE:+"--load-cookies"} ${CFILE:+"${CFILE}"} \
+			--out="${flv1}" \
+			"${url1}" &
+		pid="${!}"
+		len=$((${end}-${start}))
+		c=$((${len}/100000))
+		[ ${c} -ge 10 ] || c=10
+		while kill -0 "${pid}" && \
+		[ ${c} -gt 0 ] && \
+		[ $(stat -c %s "${flv1}" 2> /dev/null || echo 0) -lt $len ]; do
+			c=$(($c-1))
+			sleep 1
+		done
+
+		if kill -0 "${pid}"; then
+			kill "${pid}"
+			wait "${pid}" || :
+		else
+			wait "${pid}" || exit 1
+		fi
+	done
+	cat "${flv}_*.flv" > "${flv}_.flv"
+	ffmpeg -i "${flv}_.flv" -acodec copy -vcodec copy "${flv}.flv"
+	rm "${flv}_"*
+	:
+}
+
+_len_contents() {
+	local len
+	export LC_ALL=C LANG= LANGUAGE=
+	case "${JA_DWNLDR}" in
+	*curl)
+		len="$("${JA_DWNLDR}" -sI "${URL}" | tr -d '\r' | \
+			awk '$1 ~ "ontent-.ength" {print $2; exit}')"
+		;;
+	*wget)
+		len="$("${JA_DWNLDR}" \
+			--spider \
+			-t 3 \
+			-T 15 \
+			--no-check-certificate \
+			--server-response \
+			--input-file="${UFILE}" 2>&1 | \
+			tr -d '\r' | \
+			awk '$1 ~ "Length" {print $2; exit}')"
+		EOF
+		;;
+	esac
+
+	[ -n "${len}" ] || \
+		exit 1
+	echo "${len}"
+}
+_jafg_curl_part() {
+	export LC_ALL=C LANG= LANGUAGE=
+
+	len="$(_len_contents)"
+	[ -n "${len}" ] || \
+		exit 1
+
+	rs=0
+	i=0
+	len0=$(( ${len} - 1 ))
+
+	ranges=""
+	str="$(cut -f 1 -s -d '-' <<< "${CURL_PART_PERCENT}")"
+	end="$(cut -f 2 -s -d '-' <<< "${CURL_PART_PERCENT}")"
+	if [ -n "${str}" ]; then
+		str=$(((len*str/100)-1))
+		ranges="0-4096"
+	else
+		str=0
+	fi
+	if [ -n "${end}" ]; then
+		end=$((len*end/100))
+		[ ${end} -le ${len0} ] || \
+			end=${len0}
+	fi
+
+	ranges="${ranges} ${str}-${end}"
+
+	i=0
+	for range in ${ranges}; do
+		i=$(($i+1))
+		fname="${FNAME}.part$i"
+		fheader="${FNAME}.header$i"
+
+		"${JA_DWNLDR}" \
+			--range ${range} \
+			--location \
+			${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+			${COOKIE:+"-b"} ${COOKIE:+"${COOKIE}"} \
+			${POST:+"-d"} ${POST:+"${POST}"} \
+			--dump-header "${fheader}" \
+			--output "${fname}" \
+			"${URL}" && rc=0 || rc="${?}"
+	done
+
+	return "${rc}"
+}
+
+_jafg_multipart() {
+	local split="${1}"
+	local len
+
+	export LC_ALL=C LANG= LANGUAGE=
+
+	len="$(_len_contents)"
+	[ -n "${len}" ] || \
+		exit 1
+
+	part=$(( ( ${len} + 10 ) / ${split} ))
+	pids=""
+	fnames=()
+	rs=0
+	i=0
+	len0=$(( ${len} - 1 ))
+	while :; do
+		[ ${rs} -le ${len0} ] || \
+			break
+		i=$(( $i + 1 ))
+		idx="$(printf '%03d\n' $i)"
+		str=${rs}
+		end=$(( ${rs}+${part}-1 ))
+		[ ${end} -le ${len0} ] || \
+			end=${len0}
+		range="${str}-${end}"
+		rs=$(( ${end} + 1 ))
+		partsize=$(( ${rs} - ${str} ))
+
+		c=10
+		fname="${FNAME}.part${idx}"
+		fheader="${FNAME}.header${idx}"
+		fnames+=( "${fname}" )
+		while [ ${c} -gt 0 ]; do
+			c=$(($c-1))
+			# TODO: check current length of the file, if present
+			# and compute the new variables range and str
+			# because options to continue are not valid
+			# for this kind of downloads
+			case "${JA_DWNLDR}" in
+			*curl)
+				"${JA_DWNLDR}" \
+					--range ${range} \
+					--location \
+					${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+					${COOKIE:+"-b"} ${COOKIE:+"${COOKIE}"} \
+					${POST:+"-d"} ${POST:+"${POST}"} \
+					--dump-header "${fheader}" \
+					--output "${fname}" \
+					"${URL}" && rc=0 || rc="${?}"
+				;;
+			*wget)
+				( "${JA_DWNLDR}" \
+					-t 3 \
+					-T 15 \
+					--no-check-certificate \
+					--output-document="${fname}" \
+					--progress=bar:force \
+					 --server-response \
+					--directory-prefix="${FOLDER}" \
+					${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+					${POST:+"--post-data"} ${POST:+"${POST}"} \
+					${CFILE:+"--load-cookies"} ${CFILE:+"${CFILE}"} \
+					${COOKIE:+"--header=Cookie:"}${COOKIE:+"${COOKIE}"} \
+					$(if [ ${str} -gt 0 ]; then
+						echo " " "--start-pos" "${str}"
+					else
+						echo " " "--continue"
+					fi) \
+					--input-file="${UFILE}" > "${fheader}" 2>&1) &
+				pid="${!}"
+				if [ ${end} -ne ${len0} ]; then
+					set +x
+					while kill -0 "${pid}" && \
+					[ $(_filesize "${fname}") -lt "${partsize}" ]; do
+						sleep 1
+					done
+					set -x
+					if kill -0 "${pid}"; then
+						kill "${pid}"
+						wait "${pid}" || :
+						rc=0
+					else
+						wait "${pid}" && rc=0 || rc="${?}"
+					fi
+					[ $(_filesize "${fname}") -le "${partsize}" ] || \
+						truncate -s "${partsize}" "${fname}"
+				else
+					wait "${pid}" && rc=0 || rc="${?}"
+				fi
+				;;
+			esac
+
+			if [ "${rc}" -ne 0 ] || \
+			[ ! -s "${fheader}" ] || \
+			grep -qsEe 'HTTP/1.1 [4-5][[:digit:]]{2}[^[:digit:]]' \
+			"${fheader}"; then
+				if [ -n "${DEBUG}" ]; then
+					ftmp="$(mktemp "./${FNAME}-${idx}-XXXXX")"
+					mv "${fname}" "${ftmp}" || :
+					mv "${fheader}" "${ftmp}.header" || :
+				else
+					rm -f "${fname}"
+				fi
+				[ ${c} -gt 0 ] || \
+					return 1
+				sleep 100
+			else
+				rm -f "${fheader}"
+				break
+			fi
+		done &
+		pids="${pids:+"${pids} "}${!}"
+	done
+
+	wait ${pids} || \
+		exit 1
+
+	for fname in "${fnames[@]}"; do
+		[ -s "${fname}" ] || \
+			exit 1
+	done
+	cat "${fnames[@]}" > "${fname}"
+	rm -f "${fnames[@]}"
+	:
+}
+
+_jafg_aria2c() {
+
+	_magnet_info() {
+		local hash
+		hash=$(echo "${1}" | grep -oP "(?<=btih:).*?(?=&)")
+		echo "Magnet hash: ${hash}"
+		"${JA_DWNLDR}" --bt-metadata-only=true --bt-save-metadata=true -q "${1}"
+		"${JA_DWNLDR}" "${hash}.torrent" -S
+	}
+
+_external_IP() {
+	external_ip="$(wget -q -O - http://checkip.dyndns.com/  2>/dev/null | \
+		sed -n -e '/.*Current IP Address: \([0-9\.]*\).*$/{s//\1/p;q}')"
+	[ -n "${external_ip}" ] || \
+	external_ip="$(wget -q -O - http://ipecho.net/plain 2>/dev/null | \
+		sed -n -e '/^\([0-9\.]*\)$/{s//\1/p;q}')"
+	[ -n "${external_ip}" ] || \
+	external_ip="$(wget -q -O - http://ifconfig.me/ip 2>/dev/null | \
+		sed -n -e '/^\([0-9\.]*\)$/{s//\1/p;q}')"
+	[ -n "${external_ip}" ] || \
+		return 1
+}
+
+_listen_port() {
+	if listen_port="$(/usr/bin/lnet-upnpclient port-get \
+	"${ARIA2C_UPNP_RANGE:-"6800-6899"}")"; then
+		trap _finish ERR EXIT
+		_listen_port_watchdog "${listen_port}" "${$}" &
+		if [ -n "${ARIA2C_DHT:-}" ] && \
+		listen_port_dht="$(/usr/bin/lnet-upnpclient port-get \
+		"${ARIA2C_UPNP_RANGE:-"6800-6899"}")" && \
+		_external_IP; then
+			_listen_port_watchdog "${listen_port_dht}" "${$}" &
+		fi
+	fi
+}
+
+	listen_port=""
+	listen_port_dht=""
+	external_ip=""
+	if grep -qsEe '^magnet:' <<< "${URL}"; then
+		_magnet_info "${URL}"
+		_listen_port
+	elif grep -qsEe '[.](torrent|meta4|metalink)$' <<< "${URL}"; then
+		"${JA_DWNLDR}" "${URL}" -S
+		_listen_port
+	fi >&2
+
+	"${JA_DWNLDR}" \
+		--continue \
+		--split=${ARIA2C_SPLIT} \
+		$( test ${ARIA2C_SPLIT} -gt 1 || \
+			printf '%s' "--file-allocation=none" ) \
+		--check-integrity=true \
+		${ARIA2C_SELECT:+"--select-file"} ${ARIA2C_SELECT:+"${ARIA2C_SELECT}"} \
+		--no-netrc=true \
+		--check-certificate=false \
+		--enable-http-pipelining=true \
+		--max-connection-per-server=${ARIA2C_SPLIT} \
+		${listen_port:+"--listen-port"} ${listen_port:+"${listen_port}"} \
+		${listen_port_dht:+"--dht-listen-port"} ${listen_port_dht:+"${listen_port_dht}"} \
+		${external_ip:+"--bt-external-ip"} ${external_ip:+"${external_ip}"} \
+		--bt-stop-timeout=120 \
+		--seed-time=0 \
+		--max-tries=8 \
+		-d "${FOLDER}" \
+		${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+		${FNAME:+"--out"} ${FNAME:+"${FNAME}"} \
+		${CFILE:+"--load-cookies"} ${CFILE:+"${CFILE}"} \
+		"${URL}"
+	:
+}
+
+_jobadmin_flashgot() {
+	[ -z "${DEBUG:-}" ] || \
+		set -x
+
+	if [ -n "${CURL_PART_PERCENT:-}" ]; then
+		JA_DWNLDR="$(which curl)" || \
+			exit 1
+	else
+		CURL_PART_PERCENT=""
+	fi
+
+	if grep -qsEe '^magnet:|[.](torrent|meta4|metalink)$' <<< "${URL}"; then
+		JA_DWNLDR="$(which aria2c)" || \
+			exit 1
+	fi
+
+	if grep -qse 'youtube-dl' <<< "${JA_DWNLDR}" && \
+	! "${JA_DWNLDR}" \
+	--no-check-certificate \
+	--no-call-home \
+	--get-url "${REFERER:-"${URL}"}"; then
+		JA_DWNLDR=""
+	else
+		"${JA_DWNLDR}" \
+		--no-check-certificate \
+		--no-call-home \
+		-F "${REFERER:-"${URL}"}" || :
+	fi
+
+	if ! JA_DWNLDR="$(which "${JA_DWNLDR:-}")"; then
+		JA_DWNLDR="$(which aria2c || \
+		which curl || \
+		which wget || \
+		which youtube-dl)" || \
+			exit 1
+	fi
+
+	case "${JA_DWNLDR}" in
+	*aria2c)
+		ARIA2C_SPLIT="${ARIA2C_SPLIT:-4}"
+		if grep -qse 'flv.*start=' <<< "${URL}"; then
+			_jafg_aria2c_flv
+		else
+			_jafg_aria2c
+		fi
+		;;
+	*curl)
+		# multipart download with curl is in development
+		CURL_SPLIT="${CURL_SPLIT:-1}"
+		if [ -n "${FNAME}" ]; then
+			[ "$(dirname "${FNAME}")" != "." ] || \
+				FNAME="${FOLDER}/${FNAME}"
+		else
+			FNAME="$(mktemp "${FOLDER}/$(basename "${URL}" | \
+				cut -f 1 -d '?')-XXXXX")"
+		fi
+
+		if [ -n "${CURL_PART_PERCENT:-}" ]; then
+			_jafg_curl_part
+		elif [ "${CURL_SPLIT}" -gt 1 ] && \
+		[ -n "${FNAME:-}" ]; then
+			_jafg_multipart "${CURL_SPLIT}"
+		else
+			"${JA_DWNLDR}" \
+				--location \
+				--continue-at - \
+				${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+				${COOKIE:+"-b"} ${COOKIE:+"${COOKIE}"} \
+				${POST:+"-d"} ${POST:+"${POST}"} \
+				--output "${FNAME}" \
+				"${URL}"
+		fi
+		;;
+	*wget)
+		# multipart download with wget is in development
+		WGET_SPLIT="${WGET_SPLIT:-1}"
+		if [ "${WGET_SPLIT}" -gt 1 ] && \
+		[ -n "${FNAME:-}" ]; then
+			_jafg_multipart "${WGET_SPLIT}"
+		else
+			"${JA_DWNLDR}" \
+				--continue \
+				--directory-prefix="${FOLDER}" \
+				${REFERER:+"--referer"} ${REFERER:+"${REFERER}"} \
+				${POST:+"--post-data"} ${POST:+"${POST}"} \
+				${CFILE:+"--load-cookies"} ${CFILE:+"${CFILE}"} \
+				${COOKIE:+"--header=Cookie:"}${COOKIE:+"${COOKIE}"} \
+				--input-file="${UFILE}"
+		fi
+		;;
+	*youtube-dl)
+		# only for youtube.com
+		# -f 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio' \
+		# --merge-output-format mp4
+		if dwnldr="$(which aria2c || which curl || which wget)";  then
+			"${JA_DWNLDR}" \
+			--no-check-certificate \
+			--no-call-home \
+			--external-downloader "${dwnldr}" \
+			"${REFERER:-"${URL}"}"
+		else
+			"${JA_DWNLDR}" \
+			--no-check-certificate \
+			--no-call-home \
+			"${REFERER:-"${URL}"}"
+		fi
+		;;
+	*)
+		exit 1
+		;;
+	esac
+}
+:

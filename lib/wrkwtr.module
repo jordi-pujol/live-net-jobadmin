@@ -1,0 +1,444 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# wrkwtr
+
+. "${JA_LIB}libparms"
+
+_wrkwtr_options="JA_WTRM pr@
+JA_SPLF_STSL pr@
+JA_SEQ"
+
+_wrkwtr_chgview() {
+	case "${JA_SEQ}" in
+	2)
+		JA_DIALOG_FIELDS="Opt:3:2 Wtr/Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19 Out_Queue:15"
+		;;
+	*)
+		JA_DIALOG_FIELDS="Opt:3:2 Wtr/OutQ/Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19"
+		JA_SEQ=1
+		;;
+	esac
+}
+
+_wrkwtr_wtr_line() {
+	# global all_splfs
+	local wtr="${1}"
+	local wtr_actjobs wtr_sts wtr_hld wtr_prt
+
+	[ "${wtr}" != "-" ] || return 0
+	wtr_sts="$(_read_option "JA_WTR_STS" "${JA_SPOOL}${wtr}.wtr")" || \
+		wtr_sts="ACT"
+	wtr_prt=""
+	[ "${wtr_sts}" != "ACT" ] || \
+		wtr_prt="$(_read_option "JA_PRT" "${JA_SPOOL}${wtr}.wtr")" || \
+			wtr_prt="-"
+	if wtr_hld="$(_read_option "JA_HLD" "${JA_SPOOL}${wtr}.wtr.attrs")"; then
+		wtr_sts="${wtr_sts::3}/${wtr_hld}"
+	fi
+	wtr_actjobs="$( awk -v wtr="${wtr}" \
+		'BEGIN{FS="\t"}
+		$1 == wtr && $10 ~ "WTR" {i++}
+		END{print i+0}' <<< "${list_splfs}" )"
+	printf '%s ' "WTR/${wtr}" "${wtr_sts}" "${wtr_actjobs}" "-"
+	printf '%s\n' "${wtr_prt}"
+	:
+}
+
+_wrkwtr_outq_line() {
+	# global all_splfs
+	local outq="${1}"
+	local wtr="${2}"
+	local outq_actjobs outq_hld
+
+	outq_hld="$(_read_option "JA_HLD" "${JA_SPOOL}${outq}.outq.attrs")" || \
+		outq_hld="RLS"
+	outq_actjobs="$( awk -v wtr="${wtr}" -v outq="${outq}" \
+		'BEGIN{FS="\t"}
+		$1 == wtr && $2 == outq && $10 ~ "WTR" {i++}
+		END{print i+0}' <<< "${list_splfs}" )"
+	printf '%s ' "OUTQ/${outq}" "${outq_hld}" "${outq_actjobs}"
+	printf '\n'
+	:
+}
+
+_wrkwtr_wtrs() {
+	local wtr="${1}"
+	local wtr1 wtr2 wtrs1 outq1 outqs1
+
+	outq_previous=""
+	wtrs1=""; found=""
+	for wtr1 in ${wtrs}; do
+		if [ "${wtr}" != "${wtr1}" ] &&
+		[ -z "${found}" ]; then
+			if [ "${wtr1}" != "-" ]; then
+				_wrkwtr_wtr_line "${wtr1}"
+				if [ "${JA_SEQ}" = "1" ] && \
+				! _read_option "JA_WTR_STS" "${JA_SPOOL}${wtr1}.wtr" > /dev/null; then
+					for outq1 in $(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr1}.wtr" | \
+					tr -s '[,[:blank:]]' '\n' | sort); do
+						_wrkwtr_outq_line "${outq1}" "${wtr1}"
+					done
+				fi
+			fi
+		elif [ "${wtr}" = "${wtr1}" ]; then
+			found="y"
+			_wrkwtr_wtr_line "${wtr}"
+			wtr_previous="${wtr}"
+		else
+			wtrs1="${wtrs1} ${wtr1}"
+		fi
+	done
+	wtrs="${wtrs1}"
+	if [ "${JA_SEQ}" = "1" ]; then
+		outqs=""
+		if [ "${wtr}" = "-" ]; then
+			outqs1=""
+			for wtr1 in $(cat "${JA_TMP}rwtrs.lst" | tr -s "," " "); do
+				_read_option "JA_WTR_STS" "${JA_SPOOL}${wtr1}.wtr" > /dev/null || \
+				outqs1="${outqs1} $(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr1}.wtr" | \
+					tr -s '[,[:blank:]]' '\n' | sort)"
+			done
+			for outq1 in $(cat "${JA_TMP}outqs.lst" | tr -s "," " "); do
+				grep -qswe "${outq1}" <<< "${outqs1}" || \
+					outqs="${outqs}${outqs:+" "}${outq1}"
+			done
+		else
+			_read_option "JA_WTR_STS" "${JA_SPOOL}${wtr}.wtr" > /dev/null || \
+				outqs="$(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr}.wtr" | \
+					tr -s '[,[:blank:]]' '\n' | sort)"
+		fi
+	fi
+	:
+}
+
+_wrkwtr_outqs() {
+	local outq="${1}"
+	local wtr="${2}"
+	local outq1 outqs1 found
+
+	outq_previous="${outq}"
+	outqs1=""; found=""
+	for outq1 in ${outqs}; do
+		if [ "${outq}" != "${outq1}" ] &&
+		[ -z "${found}" ]; then
+			_wrkwtr_outq_line "${outq1}" "${wtr}"
+		elif [ "${outq}" = "${outq1}" ]; then
+			found="y"
+			_wrkwtr_outq_line "${outq}" "${wtr}"
+			outq_previous="${outq}"
+		else
+			outqs1="${outqs1} ${outq1}"
+		fi
+	done
+	outqs="${outqs1}"
+	:
+}
+
+_wrkwtr_splfs() {
+	local wtr outq splf_sts_order outpty datesplf \
+			splf job job_usr job_pid splf_sts outq_sts splf_attrs
+	local wtr_previous outq_previous
+	local outqs wtrs
+
+	wtrs="$(tr -s '[,[:blank:]]' '\n' <<< "${JA_WTRM}" | sort)"
+	wtr_previous=""; outq_previous=""; outqs=""
+	unset wtr outq splf_sts_order outpty datesplf \
+			splf job job_usr job_pid splf_sts outq_sts splf_attrs
+	while IFS=$'\t' read wtr outq splf_sts_order outpty datesplf \
+	splf job job_usr job_pid splf_sts outq_sts splf_attrs; do
+		[ -n "${datesplf}" ] && \
+		[ -s "${splf_attrs}" ] || continue
+		if [ "${wtr_previous}" != "${wtr}" ]; then
+			if [ "${JA_SEQ}" = "1" ] && \
+			[ -n "${wtr_previous}" ]; then
+				for outq1 in ${outqs}; do
+					_wrkwtr_outq_line "${outq1}" "${wtr_previous}"
+				done
+				outqs=""
+			fi
+			_wrkwtr_wtrs "${wtr}"
+		fi
+		if [ "${outq_previous}" != "${outq}" ] && \
+		[ "${JA_SEQ}" = "1" ]; then
+			_wrkwtr_outqs "${outq}" "${wtr}"
+		fi
+
+		cause="-"
+		if [ "${splf_sts}" = "WTR" ]; then
+			if request="$(_read_option "JA_REQUEST" "${splf_attrs}")"; then
+				cause="$(ipptool -t \
+					"${JA_CUPS_SERVER}jobs/$(sed -nre \
+					'\|.*-([[:digit:]]+)$| s||\1|p' <<< "${request}" )" \
+					"${JA_LIB}get-job-attributes" | \
+					awk '$1 == "job-state" {print $NF; s=-1; exit}
+					END{exit s+1}')" || :
+			fi
+		else
+			cause="$(_read_option "JA_CAUSE" "${splf_attrs}")" || :
+		fi
+		[ -n "${cause}" ] || cause="-"
+		printf '%s ' "${splf}.${job}.${job_usr}.${job_pid}" \
+			"${splf_sts}" "${cause}" "${outpty}" "${datesplf}" \
+			"${outq}$(test "${outq_sts}" = "-" || printf '%s' "/${outq_sts}")" \
+			"${splf_attrs}"
+		printf '\n'
+		unset wtr outq splf_sts_order outpty datesplf \
+			splf job job_usr job_pid splf_sts outq_sts splf_attrs
+	done <<< "${list_splfs}"
+	[ "${JA_SEQ}" != "1" ] || \
+		[ -z "${outqs}" ] || \
+		_wrkwtr_outqs "---" "${wtr_previous}"
+	[ -z "${wtrs}" ] || \
+		_wrkwtr_wtrs "---"
+	:
+}
+
+_wrkwtr_refresh() {
+	local auto="${1:-}"
+	# global all_splfs all_splfs_count M cmd_options
+	local list_splfs
+
+	M=""; cmd_options=""
+	if [ -n "${auto}" ]; then
+		[ -n "${autorefresh}" ] || \
+			return 0
+		sleep 1
+	fi
+
+	if [ "${JA_SEQ}" = "1" ]; then
+		list_splfs="$(_find_splfs "" "${JA_WTRM}" "${JA_SPLF_STSL}" "" | \
+			sort -t $'\t' -k 1,1 -k 2,2 -k 3n,3 -k 4nr,4 -k 5n,5)"
+	else
+		list_splfs="$(_find_splfs "" "${JA_WTRM}" "${JA_SPLF_STSL}" "" | \
+			sort -t $'\t' -k 1,1 -k 3n,3 -k 4nr,4 -k 5n,5)"
+	fi
+
+	all_splfs="$(_wrkwtr_splfs)"
+	all_splfs_count="$(wc -l <<< "${all_splfs}")"
+	:
+}
+
+_wrkwtr() {
+	local job f datesplf
+	local wtr wtr_cgrp wtr_maxjobs wtr_ctl
+	local outq outq_wtr outq_maxjobs outq_onerror
+	local jobs_active jobs_active_wtr
+	local a job f datesplf line DIALOG job_pid job_pids status
+	local lastkey M cmd_options all_splfs all_splfs_count rc
+	local autorefresh="${JA_AUTOREFRESH:-}"
+
+	JA_DIALOG_COMMANDS="\Z1S\Zntrwtr dis\Z1P\Znlay \Z1E\Znnd \Z1H\Znold \
+\Z1R\Znelease \Z1C\Znhgsplfa \Z1D\Znltsplf dspsplf\Z1A\Zn wrkspl\Z1F\Zn"
+	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F4 F5 F6 F9 F11 F12")"
+	_wrkwtr_chgview
+	_wrkwtr_refresh
+	rc=0
+	while :; do
+		_dialog_init
+		DIALOG="$(_dialog_header "${JA_MODULE_NAME}")"
+		line=1
+		i=0
+		unset f1 f2 f3 f4 f5 f6 f7 f8
+		while read f1 f2 f3 f4 f5 f6 f7 f8; do
+			[ -n "${f1}" ] || continue
+			# formatted listing of job data
+			grep -qsE '^WTR|^OUTQ' <<< "${f1}" || \
+			[ "${f5}" = "-" ] || \
+				f5="$(date --date=@${f5} +'%Y-%m-%d %H:%M:%S')"
+
+			i=$((${i}+1))
+			m="$(_print_line "${i}" <<< "${M}")"
+			case "${JA_SEQ}" in
+			2)
+				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+					"${f1}" \
+					"${f2}" \
+					"${f3}" \
+					"${f4}" \
+					"${f5}" \
+					"${f6}")"
+				;;
+			*)
+				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+					"${f1}" \
+					"${f2}" \
+					"${f3}" \
+					"${f4}" \
+					"${f5}")"
+				;;
+			esac
+			line=$((${line}+1))
+			unset f1 f2 f3 f4 f5 f6 f7 f8
+		done <<< "${all_splfs}"
+		line=$((${line}+1))
+		DIALOG="${DIALOG}$(_dialog_options "${cmd_options}" "Parms-Cmd")"
+		# show dialog
+		rc=0
+		M="$(_dialog_exec "${JA_CONF_DLG}")" || rc="${?}"
+		cont="y"
+		lastkey="$(tail --lines=1 <<< "${M}")"
+		case "${rc}" in
+		0) # OK
+			_wrk_options
+			if [ -n "${M}" ]; then
+				i=1
+				err=""
+				M0="${M}"
+				while [ ${i} -le ${all_splfs_count} ]; do
+					m="$(_print_line "${i}" <<< "${M}")"
+					if [ -n "${m}" ]; then
+						e=""
+						JA_CMD_ARGS=()
+						JA_CMD_CMD=""
+						act_splf="$(awk -v i="${i}" \
+						'NR == i {print $1; exit}' <<< "${all_splfs}")"
+						case "${act_splf}" in
+						WTR/*)
+							if _cmd_abv_dsc "${m}" "WTR,SYS"; then
+								if echo "${JA_CMD_OBJ}" | grep -qswe "WTR"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_WTR=$(cut -f 2 -d '/' <<< "${act_splf}")"
+								fi
+							else
+								e="Yes"
+							fi
+							;;
+						OUTQ/*)
+							if _cmd_abv_dsc "${m}" "OUTQ,SYS"; then
+								if echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_OUTQ=$(cut -f 2 -d '/' <<< "${act_splf}")"
+								fi
+							else
+								e="Yes"
+							fi
+							;;
+						*)
+							if _cmd_abv_dsc "${m}" "SPLF,JOB,WTR,OUTQ,SYS"; then
+								if echo "${JA_CMD_OBJ}" | grep -qswe "SPLF"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_SPLF=$(cut -f 1 -s -d '.' <<< "${act_splf}")" \
+									"JA_JOB=$(cut -f 2 -s -d '.' <<< "${act_splf}")" \
+									"JA_USR=$(cut -f 3 -s -d '.' <<< "${act_splf}")" \
+									"JA_PID=$(cut -f 4 -s -d '.' <<< "${act_splf}")"
+								elif echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_JOB=$(cut -f 2 -s -d '.' <<< "${act_splf}")" \
+									"JA_USR=$(cut -f 3 -s -d '.' <<< "${act_splf}")" \
+									"JA_PID=$(cut -f 4 -s -d '.' <<< "${act_splf}")"
+								elif echo "${JA_CMD_OBJ}" | grep -qswe "WTR"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_WTR=$(awk -v i="${i}" \
+										'NR == i {print $1; exit}' <<< "${all_splfs}" | \
+										cut -f 1 -d '/')"
+								elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
+									_options_reuse "${JA_CMD_CMD}" \
+									"JA_OUTQ=$( awk -v i="${i}" \
+										'NR == i {print $2; exit}' <<< "${all_splfs}" | \
+										cut -f 1 -d '/')"
+								fi
+							else
+								e="Yes"
+							fi
+							;;
+						esac
+						if [ -z "${e}" ]; then
+							if [ -n "${JA_CMD_CMD}" ]; then
+								[ -z "${cmd_options}" ] || \
+									eval JA_CMD_ARGS+=(${cmd_options})
+								if [ -z "${JA_FKEY_CONFIRM}" -a \
+								"${JA_CMD_TERMINAL}" -lt 1 ]; then
+									_cmd_exec_background || e="No"
+								else
+									_cmd_exec || e="No"
+								fi
+							else
+								e="Yes"
+							fi
+						fi
+						if [ -z "${e}" ]; then
+							M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
+						else
+							[ "${e}" != "Yes" ] || \
+								_usr_notify "Invalid option '${m}'." "" "y"
+							err="Yes"
+						fi
+					fi
+					i=$((${i}+1))
+				done
+				if [ -n "${err}" ]; then
+					M="${M0}"
+				else
+					_${JA_MODULE}_refresh "y"
+				fi
+			elif [ -n "${cmd_options}" ] && \
+			eval JA_CMD_ARGS=(${cmd_options}); then
+				if _cmd_dsc "${JA_CMD_ARGS[@]}"; then
+					unset JA_CMD_ARGS[0]
+					if [ -z "${JA_FKEY_CONFIRM}" -a \
+					"${JA_CMD_TERMINAL}" -lt 1 ]; then
+						if _cmd_exec_background; then
+							_${JA_MODULE}_refresh "y"
+						fi
+					else
+						if _cmd_exec; then
+							_${JA_MODULE}_refresh "y"
+						fi
+					fi
+				else
+					_cmd_exec_shell
+					_${JA_MODULE}_refresh "y"
+				fi
+			else
+				_${JA_MODULE}_refresh "y"
+			fi
+			;;
+		2)
+			_help_cmds
+			;;
+		3)
+			_extra_button
+			;;
+		4) # NO Item-Help
+			_usr_notify "$(_usage 2>&1)" "" "y"
+			;;
+		1|255) # 1=Cancel 255=Esc
+			rc=0
+			break
+			;;
+		*)
+			_usr_notify "error ${rc} in dialog." "" "y"
+			break
+			;;
+		esac
+	done
+	_dialog_end
+	return "${rc}"
+} # wrkwtr

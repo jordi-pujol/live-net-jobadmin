@@ -1,0 +1,50 @@
+Source: jobadmin
+Section: admin
+Priority: optional
+Maintainer: Jordi Pujol Palomer <jordipujolp@gmail.com>
+Uploaders: Jordi Pujol Palomer <jordipujolp@gmail.com>
+Build-Depends: bash (>= 5.0),
+ gawk,
+Homepage: http://livenet.ddns.net/
+
+Package: jobadmin
+Architecture: all
+Depends: ${misc:Depends},
+ jobadmin-systemd | jobadmin-sysv,
+ bash (>= 5.0),
+ ed,
+ gawk,
+ cgroup-bin (<= 0.38-3) | cgroup-tools | systemd-sysv,
+ dialog (>= 1.2-20130523-1),
+ acl,
+ getopt-sh,
+ screen,
+ inotify-tools,
+Recommends: libnotify-bin, notification-daemon,
+ lsof,
+ xdotool,
+ most, cups, cups-client,
+ gnome-icon-theme | adwaita-icon-theme,
+ aria2, curl, wget, youtube-dl,
+ miniupnpc, live-net-initramfs,
+Suggests:
+Description: Linux jobs manager.
+ Jobadmin is an utility to manage system jobs in IBM/AS400 style. Is 
+ intended for a single computer with multiple users; the users can be 
+ connected locally or remote via an ssh terminal. Jobadmin controls 
+ jobs using interactive commands or display lists that are shown in 
+ dialog forms.
+
+Package: jobadmin-systemd
+Architecture: all
+Depends: ${misc:Depends},
+ jobadmin,
+ systemd-sysv (>= 215-2),
+Description: Jobadmin's systemd specific files.
+
+Package: jobadmin-sysv
+Architecture: all
+Depends: ${misc:Depends},
+ jobadmin,
+ sysvinit-core, sysvinit-utils,
+Description: Jobadmin's sysvinit specific files.

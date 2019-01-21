@@ -1,0 +1,81 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# ends a subsystem
+
+_endsbs_options="JA_SBSD rp"
+
+# it's supposed that when we have permission to manage subsystems
+# implies also we have permission to end a job of any user
+_endsbs() {
+	local sbsd hld sts attrs job jobq pidfile usr
+
+	sbsd="${JA_SPOOL}${JA_SBSD}.sbsd"
+	if ! _test_rw "${sbsd}"; then
+		_usr_notify "Error: Not authorized to manage subsystem '${JA_SBSD}' "
+		return 1
+	fi
+
+	hld="$(_read_option "JA_HLD" "${JA_SPOOL}${JA_SBSD}.sbsd.attrs")" || :
+	if sts="$(_read_option "JA_SBSD_STS" "${sbsd}")"; then
+		_usr_notify "Warning: ${hld:+"Held "}subsystem '${JA_SBSD}' is already stopped."
+		return 0
+	fi
+
+	_usr_notify "Ending ${hld:+"Held "}subsystem '${JA_SBSD}' "
+
+	# terminate all jobs running in this subsystem
+	unset pidfile
+	while read pidfile; do
+		[ -s "${pidfile}" ] || continue
+
+		attrs="$(dirname "${pidfile}")/job.attrs"
+		job="$(basename "$(dirname "${attrs}")" ".job")"
+		usr="$(stat -c "%U" "${attrs}")"
+		if ! test -r "${attrs}"; then
+			_usr_notify "Error: not authorized to manage job '${job}.${usr}'."
+			continue
+		fi
+		if kill -0 "$(cat "${pidfile}")" > /dev/null 2>&1 && \
+		jobq="$(_read_option "JA_JOBQ" "${attrs}")" && \
+		[ "$(awk -v jobq="${jobq}" 
+		'$1 == jobq {print $2; rc=-1; exit) END{exit rc+1}' \
+		"${JA_CONF_JOBQS}")" = "${JA_SBSD}" ]; then
+			JA_CMD_CMD="endjob"
+			JA_CMD_ARGS=("--job" "${job}")
+			[ "${JA_USRACT}" = "${usr}" ] || \
+				JA_CMD_ARGS+=("--user" "${usr}")
+			_cmd_exec_background || :
+		fi
+		unset pidfile
+	done < <(_find_job_files "job.pid" "")
+
+	_usr_notify "${hld:+"Held "}subsystem '${JA_SBSD}' ended."
+	_set_option "${sbsd}" "JA_SBSD_STS" "STP"
+} # endsbs

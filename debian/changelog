@@ -1,0 +1,797 @@
+jobadmin (1.77) unstable; urgency=medium
+
+  * Bash is required at minimum version 5.0
+  * set lowest timeout for pwrdwnsys notifications.
+  * wait option -f of Bash 5.0
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 07 Jan 2019 03:24:45 +0100
+
+jobadmin (1.76) unstable; urgency=medium
+
+  * any of the variables in a chg command should have a value
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 01 Dec 2018 15:19:22 +0100
+
+jobadmin (1.75) unstable; urgency=medium
+
+  * set an international format for dates: %Y-%m-%d %H:%M:%S
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 14 Nov 2018 02:04:58 +0100
+
+jobadmin (1.74) unstable; urgency=medium
+
+  * pimp pwrdwnsys messages
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 26 May 2018 08:20:20 +0200
+
+jobadmin (1.73) unstable; urgency=medium
+
+  * to execute interactive commands must check if daemon is running.
+  * suppress jobadmin-atboot.service
+  * IN DEVELOPMENT:
+  allow jobs to inhibit separately some actions:
+    - all power functions: sleep, suspend, poweroff and halt
+    - only poweroff and halt
+    - or none of them
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 14 May 2018 21:03:05 +0200
+
+jobadmin (1.72) unstable; urgency=medium
+
+  * jobadmind, _jobadmin.*_monitor:
+    continue looping when pipe_pull has not been successful
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 17 Apr 2018 14:53:48 +0200
+
+jobadmin (1.71) unstable; urgency=medium
+
+  * IN DEVELOPMENT:
+  allow jobs to inhibit separately some actions:
+    - all power functions: sleep, suspend, poweroff and halt
+    - only poweroff and halt
+    - or none of them
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 15 Dec 2017 15:39:45 +0100
+
+jobadmin (1.70) unstable; urgency=medium
+
+  * when jobadmin is chained, mesg should be disabled only once.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 24 Nov 2017 10:22:26 +0100
+
+jobadmin (1.69) unstable; urgency=medium
+
+  * optionally display log files using an X editor in read only mode.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 15 Oct 2017 11:44:58 +0200
+
+jobadmin (1.68) unstable; urgency=medium
+
+  * replace dmesg command for group permission
+    check or change on tty = /dev/pts/?
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 01 Oct 2017 14:59:25 +0200
+
+jobadmin (1.67) unstable; urgency=medium
+
+  * when pressing OK refresh an interactive subfile if auto-refresh is enabled.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 24 Jun 2017 08:48:16 +0200
+
+jobadmin (1.66) unstable; urgency=medium
+
+  * HOLD for jobs is an indicator not an status,
+    so jobs may be held at any time, even when active.
+    Held jobs will not be started again by the daemon until released.
+  * new status END for jobs that are ending.
+    when ending procedure is complete will turn to OUTQ,
+    but autostr jobs will turn to JOBQ status,
+    the same behaviour is for jobs in autostr subsystems.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 07 Jun 2017 07:49:42 +0200
+
+jobadmin (1.65) unstable; urgency=medium
+
+  * job processing options:
+    --autostr : when daemon starts then will autostart this job if
+      it was not successfully ended (rc=127).
+    --autoprg : purge this job when it ends successfully
+  * autostr jobs don't inhibit system shutdown.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 06 Jun 2017 17:12:35 +0200
+
+jobadmin (1.64) unstable; urgency=medium
+
+  * class of service: list of properties for systemd-run
+  * libflashgot:
+    aria2c reserve also a DHT port
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 03 Apr 2017 11:14:30 +0200
+
+jobadmin (1.63) unstable; urgency=medium
+
+  * submit a process for pwrdwnsys notifications.
+  * check session status before notifying a message.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 25 Jan 2017 10:34:28 +0100
+
+jobadmin (1.62) unstable; urgency=medium
+
+  * getopt-sh
+    new variable type: "a" = indicator affirmative only
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 16 Jan 2017 11:45:06 +0100
+
+jobadmin (1.61) unstable; urgency=medium
+
+  * replace tr commands by bash variable subst/replace
+  * verify jobadmin commands before execution;
+    jobadmin will show assistance when the options are invalid.
+  * JA_XCMDEDIT
+    command to view and edit a job command script in an X screen;
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 12 Jan 2017 14:05:44 +0100
+
+jobadmin (1.60) unstable; urgency=medium
+
+  * rename a job
+    new command: rnmjob
+    so, jobadmin needs a new parameter: newjob
+  * auto-start jobs.
+    new binary job attribute: autostart
+    When the daemon starts, Jobs which autostart attribute is set will be
+    automatically started if they have been stopped when the
+    system has been shutdown.
+  * show job scripts, allowing to edit when requested.
+    new command: dspjobcmd
+  * update for xdotool ver. 1:3.20160805.1-2,
+    now it is requesting option --window.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 05 Jan 2017 10:45:47 +0100
+
+jobadmin (1.59) unstable; urgency=medium
+
+  * bash completions:
+    - dh_bash-completion installs the completions
+    - better exclusion of already used options
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 11 Dec 2016 09:02:56 +0100
+
+jobadmin (1.58) unstable; urgency=medium
+
+  * enhance bash completion allowing sign "=" to separate cheatcode
+    and value
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 30 Nov 2016 10:46:56 +0100
+
+jobadmin (1.57) unstable; urgency=medium
+
+  * key to enable/disable automatic refresh in an interactive dialog form.
+    F17=Ena/Dis-Refresh
+  * bash completion
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 25 Nov 2016 10:08:24 +0100
+
+jobadmin (1.56) unstable; urgency=medium
+
+  * adapted to a new version of getopt-sh
+    that returns variable values in upper or lowercase.
+  * param values of type "multiple choice" have an optional
+    single value managed by getopt-sh.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 20 Nov 2016 14:39:11 +0100
+
+jobadmin (1.55) unstable; urgency=medium
+
+  * jobadmin-flashgot:
+    Create a libflashgot that contains a complete set of 
+    procedures allowing the user to edit the job.cmd file to change 
+    some parameters of the download.
+  * configurable automatic refresh for all dialog forms
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 18 Nov 2016 14:38:28 +0100
+
+jobadmin (1.54) unstable; urgency=medium
+
+  * lib/libjobadmin _options_reuse()
+    reuse values according to the options of the command.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 14 Nov 2016 11:45:24 +0100
+
+jobadmin (1.53) unstable; urgency=medium
+
+  * dltjob job.usr --pidl=all --keep=N
+    delete old job executions, keeping latest N executions.
+  * cmds.conf:
+    - ACC  - simplified command name
+      will not be valid in the Parameter/Command line of a form.
+  * pwrdwnsys immed:
+    systemctl needs option --ignore-inhibitors
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 10 Nov 2016 09:02:07 +0100
+
+jobadmin (1.52) unstable; urgency=medium
+
+  * When starting a subsystem the daemon will reload the related 
+    configuration.
+  * Command dltjob:
+    Extended to remove only a list of execution pids from one job.
+  * job attribute JA_PIDS:
+    Add string: jobpid:cause
+    where cause is one of: LCK, ACT, OK, CAN, ERR.
+     LCK can not start for lock, ACT when is running, CAN cancelled while
+     running, OK finished correctly, ERR finished with error.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 04 Nov 2016 09:42:57 +0100
+
+jobadmin (1.51) unstable; urgency=medium
+
+  * Create additional packages for systemd and sysv.
+  * command assistance:
+    - don't modify default values
+  * when working in an xterm, optionally open commands in a new tab or 
+    in the same terminal.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 31 Oct 2016 09:05:12 +0100
+
+jobadmin (1.50) unstable; urgency=medium
+
+  * introduce attributes for the object "job".
+  * rename object "spool file description" to splfa
+    "spool file attributes".
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 29 Oct 2016 10:10:45 +0200
+
+jobadmin (1.49) unstable; urgency=medium
+
+  * JA_DBG
+    New Job parameter to enable debug for this job.
+    sbmjob --debug
+    chgjob --debug
+    daemon jobadmind
+  * Interactive jobs with Low priority:
+    intlp: Subsystem, job queue, class, job description and job queue.
+  * Remove class parameter in command runjob.
+  * Save Jobs
+    New Variable to mark Saved jobs.
+    Command chgjob jobsav(yes/no)
+    Command sbmjob jobsav(yes/no)
+  * Save Spool files
+    New Variable to mark Saved Spool files.
+    Command chgjob splfsav(yes/no)
+    Command sbmjob splfsav(yes/no)
+    Command chgsplfa splfsav(yes/no)
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 28 Oct 2016 03:17:35 +0200
+
+jobadmin (1.48) unstable; urgency=medium
+
+  * key F6 to change command parameters.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 23 Oct 2016 20:40:22 +0200
+
+jobadmin (1.47) unstable; urgency=medium
+
+  * single sed command to parse module options and write usage
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 16 Oct 2016 15:39:57 +0200
+
+jobadmin (1.46) unstable; urgency=medium
+
+  * independent file to store hold status for jobq and sbsd
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 05 Oct 2016 04:00:16 +0200
+
+jobadmin (1.45) unstable; urgency=medium
+
+  * runjob: new command 
+    Runs a job interactively, on the user's terminal.
+    Submit a job to a job queue connected to an interactive
+    subsystem, therefore use the runjob command to execute that job.
+    Subsystem must be started and not held,
+    Job queue and job must not be held.
+    Can run only one instance of every job.
+  * jobadmin daemon:
+    Don't start automatically a job connected to an interactive subsystem.
+  * introducing new object: cls, class of service.
+    Now subsystem descriptions are linked to linux control groups
+    via classes of service.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 28 Sep 2016 09:06:00 +0200
+
+jobadmin (1.44) unstable; urgency=medium
+
+  * new job description and job queue for downloaders
+  * no maximum jobs for batch subsystem description,
+    number of active jobs is controlled by attached job queues.
+  * jobadmin-flashgot: custom downloader for FlashGot, a Firefox plugin.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 09 Sep 2016 09:54:19 +0200
+
+jobadmin (1.43) unstable; urgency=medium
+
+  * bash input:
+   replace expression
+     << EOF\n$(command)\nEOF
+   by
+     < <(command)
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 17 Jun 2016 20:08:52 +0200
+
+jobadmin (1.42) unstable; urgency=medium
+
+  * use system files instead of named pipes to manage messages for 
+    internal communications.
+  * pwrdwnsys option "STATUS":
+    in systemd: lists active jobs that inhibit a controlled system
+    shutdown.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 04 Jun 2016 18:38:49 +0200
+
+jobadmin (1.41) unstable; urgency=medium
+
+  * Clear message queue, clrmsgq:
+    specify number of message lines to keep in the queue.
+  * pwrdwnsys updates the window of a display notification:
+    My customized version of notify-send reuses the notification ID,
+    jobadmin will manage notification windows.
+  * access list of /var/tmp/jobadmin/pwrdwnsys.vars
+    is not active until the program issues a command:
+    getfacl /var/tmp/jobadmin/pwrdwnsys.vars
+  * use icons from gnome-icon-theme for a notification
+  * forcing write messages to any X terminal.
+  * pwrdwnsys processing will check for systemd-inhibit
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 16 Apr 2016 10:26:56 +0200
+
+jobadmin (1.40) unstable; urgency=medium
+
+  * develop a better pwrdwnsys procedure
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 09 Apr 2016 11:36:15 +0200
+
+jobadmin (1.39) unstable; urgency=medium
+
+  * suppress management of virtual terminal jobs because do not run in
+    systemd, now are not useful.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 27 Jan 2016 09:41:44 +0100
+
+jobadmin (1.38) unstable; urgency=medium
+
+  * systemd: inhibit system shutdown while a non-control job is running
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 19 Jan 2016 17:07:18 +0100
+
+jobadmin (1.37) unstable; urgency=medium
+
+  * in place editing with ed instead of vim,
+    is more portable and uses less resources,
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 10 Jan 2016 16:16:28 +0100
+
+jobadmin (1.36) unstable; urgency=medium
+
+  * procedure set_option will preserve permissions on files,
+    not replacing the file, instead must truncate files
+  * vim will make inplace editing files
+    because sed replaces the file and does not preserve permissions
+  * on any xterm use xdotool to create new tabs and execute commands
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 10 Dec 2015 09:37:33 +0100
+
+jobadmin (1.35) unstable; urgency=medium
+
+  * procedure _usr_homedir
+  * cleanup of _read_option procedure usage
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 06 Oct 2015 11:32:05 +0200
+
+jobadmin (1.34) unstable; urgency=medium
+
+  * new subsystem descriptions, job queues and job descriptions.
+    INTER, IBATCH, IPGMR
+    Jobs submitted to that job queues will not apply for daemon scheduling.
+  * new commands:
+    - runjob : interactively execute a job in the actual session.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 26 Sep 2015 16:35:20 +0200
+
+jobadmin (1.33) unstable; urgency=medium
+
+  * create and mantain index files for pending jobs and pending spool files.
+    - commands:  sbmjob, rlsjob, rlssplf, hldjob, hldsplf
+    - daemon
+  * writing spool files is in development status.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 08 Sep 2015 16:41:16 +0200
+
+jobadmin (1.32) unstable; urgency=medium
+
+  * active jobs will obtain a shared-lock to the corresponding
+    job queue and subsystem description;
+    Command lsof counts active jobs in a job queue or subsystem.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 24 Aug 2015 10:39:05 +0200
+
+jobadmin (1.31) unstable; urgency=medium
+
+  * run interactive jobs in a tty
+    doing a session login
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 29 Jul 2015 08:57:30 +0200
+
+jobadmin (1.30) unstable; urgency=medium
+
+  * rlsjob must lock the job directory
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 01 Jul 2015 10:19:56 +0200
+
+jobadmin (1.29) unstable; urgency=low
+
+  * mesg command can not be issued in some terminals, ignore the result code
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 18 May 2015 19:26:58 +0200
+
+jobadmin (1.28) unstable; urgency=low
+
+  * performance enhancement in set_option and read_option
+  * jobadmind: use notify-send from libnotify-bin
+    to send messages to the users of X displays.
+  * accept token "current" instead of current user name
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 30 Oct 2014 04:01:19 +0100
+
+jobadmin (1.27) unstable; urgency=low
+
+  * detect screen size when refreshing.
+  * parametrized user and groups permissions to job queues,
+    subsystems, output queues, writers.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 11 Jun 2014 09:46:19 +0200
+
+jobadmin (1.26) unstable; urgency=low
+
+  * change control groups with the cgexec command
+  * will not use start-stop-daemon to submit user jobs, sudo+screen does it well.
+  * libjoadmin: _sudo() for the root user will switch to the root's user group.
+  * parameter job name accepts form: name.user.pid
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 16 Apr 2014 18:36:05 +0200
+
+jobadmin (1.25) unstable; urgency=low
+
+  * --assist new indicator parameter for all modules (except command jobadmin)
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 11 Apr 2014 15:01:11 +0200
+
+jobadmin (1.24) unstable; urgency=low
+
+  * jobadmind: instant management of signals, TERM, HUP
+  * jobadmind: use inotifywait instead of sleeping and check new status,
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 20 Mar 2014 13:09:37 +0100
+
+jobadmin (1.23) unstable; urgency=low
+
+  * use xmessage to display X messages, alternative to notify-send.
+  * cmd_exec: escape parameter values that contain special characters.
+  * awk: variable values are set as parameters.
+  * jobadmind: screen parameters changed to -dmS instead of -DmS,
+    for compatibility with other versions of screen.
+  * faster stop.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 21 Feb 2014 16:15:56 +0100
+
+jobadmin (1.22) unstable; urgency=low
+
+  * execute commands in lxterminal and gnome-terminal.
+  * in not QT environments send desktop messages invoking notify-send.
+  * also execute system commands from the Cmd/Parms line.
+  * remove unwanted wait instructions.
+  * Use bash history to manage command history.
+  * libjobadmin: simplify the function _usr_notify
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 06 Feb 2014 17:16:52 +0100
+
+jobadmin (1.21) unstable; urgency=low
+
+  * use the pid group as job pid.
+  * pwrdwnsys: parameter xsaver changes default value to No.
+  * hldjob command: remove pid parameter.
+  * interactive forms: better execution of selected commands.
+  * pwrdwnsys: correct computing of idle cpu in daemon's routines.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 29 Nov 2013 10:32:07 +0100
+
+jobadmin (1.20) unstable; urgency=low
+
+  * Group adm will be the jobs control group, instead of group jobadmin.
+  * remove duplicate message when a job is ending.
+  * pwrdwnsys is allways authorized to halt and reboot,
+    hibernate and suspend is parametrized.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 27 Sep 2013 16:28:29 +0200
+
+jobadmin (1.19) unstable; urgency=low
+
+  * auto reserve fd numbers for bash processing,
+  * filesystem permissions will be the key to allow users
+    to manage jobs.
+    The filesystem permissions are set to allow user's group jobadmin
+    to manage all user's jobs,
+    but for the root user, group jobadmin only can read jobs data.
+    Group jobadmin is not authorized to modify the user's root jobs.
+  * Group jobadmin has permission to kill all jobs.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 21 Sep 2013 08:36:15 +0200
+
+jobadmin (1.18) unstable; urgency=low
+
+  * new command wrkjobq.
+  * parameter "JA_USR" will be a choice of jobadmin valid user names.
+  * add parameters:
+    list of job queues.
+    list of users.
+  * use that parameters in the wrkactjob command.
+  * jobadmin commands will use the variable named JA_CMD.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 13 Sep 2013 15:00:22 +0200
+
+jobadmin (1.17) unstable; urgency=low
+
+  * assistance forms accept two-character abbreviated commands.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 15 Aug 2013 20:22:55 +0200
+
+jobadmin (1.16) unstable; urgency=low
+
+  * simplify pwrdwnsys processing.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 05 Jul 2013 16:05:45 +0200
+
+jobadmin (1.15) unstable; urgency=low
+
+  * working
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 28 Jun 2013 09:01:45 +0200
+
+jobadmin (1.14) unstable; urgency=low
+
+  * working
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 19 Apr 2013 09:57:28 +0200
+
+jobadmin (1.13) unstable; urgency=low
+
+  * working
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 19 Apr 2013 09:56:55 +0200
+
+jobadmin (1.12) unstable; urgency=low
+
+  * F9: recover commands on interactive forms.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 09 Apr 2013 16:15:23 +0200
+
+jobadmin (1.11) unstable; urgency=low
+
+  * saving date of last run job.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 04 Apr 2013 10:26:48 +0200
+
+jobadmin (1.10) unstable; urgency=low
+
+  * jobmenu: menus by object type
+  * jobadmind: power off detects X screen saver and cpu idle.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 01 Apr 2013 09:51:16 +0200
+
+jobadmin (1.09) unstable; urgency=low
+
+  * writers, printers and output queues management
+  * strwtr: select from wich output queues the writer
+    will read spool files and print.
+  * endsplfprt: end spool file printing.
+    cancels the printing of one spool file.
+  * dsplog: display jobadmind log or system logs.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 18 Mar 2013 08:33:18 +0100
+
+jobadmin (1.08) unstable; urgency=low
+
+  * add new command modules for writers, output queues
+    and spool files.
+  * working
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 14 Mar 2013 13:57:37 +0100
+
+jobadmin (1.07) unstable; urgency=low
+
+  * jobadmind: recode the daemon's monitor of pending jobs,
+    simpler and faster.
+  * libjobadmin: _set_option() will allways remove options
+    that have no value.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 12 Mar 2013 13:13:12 +0100
+
+jobadmin (1.06) unstable; urgency=low
+
+  * jobadmind: at beginning, the daemon will parse configuration files
+    and save the result in the JA_TMP directory.
+    I made this change for speed reasons,
+    because utilities like awk, sed or grep will read faster
+    the files that contain few lines.
+    Also, after this change,
+    the reload of the daemon will rebuild that files,
+    that is a more coherent functionality.
+  * jobadmind: increase JA_INTERVAL from 60 to 600 seconds
+    (one step towards remove this interval).
+  * jobadmin.module: print command errors more human-readable.
+  * jobmenu.module: is a new module that introduces
+    all jobadmin commands in a menu.
+    Jobadmin assistance is requested when the user selects one.
+  * new job parameter: job priority
+    from 1 to 5: 1 for low, 5 for high, normal is 3.
+    Is the job queue priority to be considered for processing in a subsystem.
+  * jobadmind: not locking that job when the daemon is calling start-stop-daemon.
+  * allow writing custom scripts in the files "job.cmd".
+    Jobadmin detects custom scripts and will not modify them,
+    the user may edit that files with his favourite editor.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 10 Mar 2013 10:11:04 +0100
+
+jobadmin (1.05) unstable; urgency=low
+
+  * use also another daemon pipe to avoid processing delays.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 08 Mar 2013 16:04:53 +0100
+
+jobadmin (1.04) unstable; urgency=low
+
+  * store command arguments in a bash array: JA_CMD_ARGS
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 06 Mar 2013 22:16:17 +0100
+
+jobadmin (1.03) unstable; urgency=low
+
+  * job status: JOBQ(blank) OUTQ ACT HLD
+  * jobq status: is allways active, only can be hold: HLD or blank
+  * sbsd status: STOP ACT, independent of held or released,
+  * sbsd hold: a separate variable for HLD or blank
+  * discard not useful parameter msgout/msgshr.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 01 Mar 2013 11:50:43 +0100
+
+jobadmin (1.02) unstable; urgency=low
+
+  * monitor job ending
+  * better working with jobs of another user
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 25 Feb 2013 04:34:55 +0100
+
+jobadmin (1.01) unstable; urgency=low
+
+  * new design,
+    every user saves their own jobs in a HOME subdirectory,
+    text message queues for every user,
+    each command is a shell script contained in a separated module
+  * submit every daemon function to the named pipe
+    using their parameters,
+    Each function will test that parameters.
+  * messages of a daemon's function
+    will be printed to the user message queue
+  * job status: JOBQ OUTQ ACT, HLD ?
+  * jobq status: is allways active, only can be hold: HLD or blank
+  * sbsd status: STOP ACT, HLD ?
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 08 Feb 2013 11:10:00 +0100
+
+jobadmin (0.16) unstable; urgency=low
+
+  * param msgout: commands started in a new konsole tab
+    will redirect their messages to the previous msgtailbox.
+  * JA_TMP: directory for temporary files
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 05 Feb 2013 00:34:30 +0100
+
+jobadmin (0.15) unstable; urgency=low
+
+  * F4=assist (originally OS400 named it "prompt").
+  * command jobadmin to invoke assistance.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 21 Jan 2013 16:04:46 +0100
+
+jobadmin (0.14) unstable; urgency=low
+
+  * F4=assist (originally OS400 named it "prompt").
+  * command jobadmin to invoke assistance.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 16 Jan 2013 11:05:56 +0100
+
+jobadmin (0.12) unstable; urgency=low
+
+  * working
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 11 Jan 2013 15:49:03 +0100
+
+jobadmin (0.11) unstable; urgency=low
+
+  * jobs named to name.user.number
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 08 Jan 2013 08:53:16 +0100
+
+jobadmin (0.10) unstable; urgency=low
+
+  * rename fields and files for coherency.
+  * adopt new version of getopt-sh.
+    - configurable default values for command options
+    - positional command options
+  * customized dialog package that prints the code of last pressed key.
+    - F1=265 F12=276 ^H=8 ^O=15 ^R=18
+    - EXTRA,HELP,OK will return last key code
+    - CANCEL not returns last key code
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 12 Dec 2012 09:42:34 +0100
+
+jobadmin (0.09) unstable; urgency=low
+
+  * set dialog's function keys on form-field.
+    Thanks to Thomas Dickey for help.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 27 Apr 2012 10:42:28 +0200
+
+jobadmin (0.08) unstable; urgency=low
+
+  * use the sha256sum as file name for _flock
+  * dialog's debug, --trace /tmp/dialog.txt
+  * export NCURSES_TRACE=0xffff
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 12 Oct 2011 09:49:04 +0200
+
+jobadmin (0.07) unstable; urgency=low
+
+  * measure execution time
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 11 Aug 2011 12:04:53 +0200
+
+jobadmin (0.06) unstable; urgency=low
+
+  * use flock to synchronize tasks
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 14 Jun 2011 08:36:23 +0200
+
+jobadmin (0.05) unstable; urgency=low
+
+  * add command sbmpwroff to submit a "power off" job
+    that will halt the system when there are no active batch jobs.
+  * new job parameter: on termination error execute "hold job queue"
+  * TODO: dialog windowing for wrkjobq *all
+    and wrkjobq jobq-name
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 18 May 2011 17:11:39 +0200
+
+jobadmin (0.04) unstable; urgency=low
+
+  * dialog windowing interface.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 20 Feb 2011 14:23:15 +0100
+
+jobadmin (0.03) unstable; urgency=low
+
+  * directory JA_EXECS contains multiple executions of the same job
+  * sed expressions
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Mon, 10 Jan 2011 16:59:24 +0100
+
+jobadmin (0.02) unstable; urgency=low
+
+  * Job Admin, batch job manager
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 04 Dec 2010 15:59:22 +0100
+
+jobadmin (0.01) unstable; urgency=low
+
+  * Job Admin, batch job manager
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 30 Nov 2010 11:52:35 +0100

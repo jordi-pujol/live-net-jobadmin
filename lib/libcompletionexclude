@@ -1,0 +1,176 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# Helper function for _parse_help, _parse_help_exclude and _parse_usage.
+__parse_expand_option()
+{
+    local option="${1}" option2 IFS
+    IFS=$' \t\n' # affects parsing of the regexps below...
+
+    # Expand --[no]foo to --foo and --nofoo etc
+    if [[ $option =~ (\[((no|dont)-?)\]). ]]; then
+        option2="${option/"${BASH_REMATCH[1]}"/}"
+        option2="${option2%%[<{().[]*}"
+        printf '%s\n' "${option2/=*/=}"
+        option="${option/"${BASH_REMATCH[1]}"/"${BASH_REMATCH[2]}"}"
+    fi
+
+    option="${option%%[<{().[]*}"
+    printf '%s\n' "${option/=*/=}"
+}
+
+# Helper function for _parse_help_exclude.
+__parse_all_options()
+{
+    local options=() i IFS=$' \t\n,/|'
+    for i in $1; do
+        case $i in
+            ---*) break ;;
+            --?*) options+=( $(__parse_expand_option "${i}") ) ;;
+            -?*)  options+=( $(__parse_expand_option "${i}") ) ;;
+            *)    break ;;
+        esac
+    done
+    IFS='|'; printf '%s\n' "${options[*]}"
+}
+
+# Helper function for _parse_help, _parse_help_exclude and _parse_usage.
+__parse_options()
+{
+    local option="" i IFS=$' \t\n,/|'
+    for i in $1; do
+        case $i in
+            ---*) break ;;
+            --?*) option="${i}" ; break ;;
+            -?*)  [[ $option ]] || option="${i}" ;;
+            *)    break ;;
+        esac
+    done
+    [ -z "${option}" ] || \
+        __parse_expand_option "${option}"
+}
+
+# This function lists options.
+# @stdin     helptext, option lines only
+# @param $1  1- null to list only the most significant option in each line
+#            2- not-null to list all the option names in each help line,
+#               separated by '|' vertical bar.
+_parse_help_lines()
+{
+    local line
+    while read -r line; do
+        [ -z "${1:-}" ] && \
+            __parse_options "${line}" || \
+            __parse_all_options "${line}"
+    done
+}
+
+# Parse GNU style help output of the given command,
+# This function writes a formatted listing of all options.
+# @param $1  command; if "-", read from stdin and ignore second arg
+# @param $2  command options (default: --help)
+_parse_help_text()
+{
+    eval local cmd=$( quote "$1" )
+    local line
+    { case $cmd in
+        -) cat ;;
+        *) LC_ALL=C "$( dequote "$cmd" )" ${2:---help} 2>&1 ;;
+      esac } \
+    | while read -r line; do
+
+        [[ $line == *([[:blank:]])-* ]] || continue
+        # transform "-f FOO, --foo=FOO" to "-f , --foo=FOO" etc
+        while [[ $line =~ \
+            ((^|[^-])-[A-Za-z0-9?][[:space:]]+)\[?[A-Z0-9]+\]? ]]; do
+            line=${line/"${BASH_REMATCH[0]}"/"${BASH_REMATCH[1]}"}
+        done
+        printf '%s\n' "${line// or /, }"
+
+    done
+}
+
+# Parse GNU style help output of the given command
+# This function lists already used options.
+# stdin      helptext, option lines only
+# @param $1  The options up to this line number are positional
+#            and are already in use,
+#            this parameter may be omitted
+# @param $2  This regexp lists the options that can be specified
+#            multiple times, i.e.: "--opt1|--opt2|--opt3",
+#            this parameter may be omitted
+_parse_options_exclude()
+{
+    local options=( $(_parse_help_lines "all") )
+    local opt w wordlist=()
+    if [ ${1:-0} -gt 0 ]; then
+        wordlist=("${options[@]:0:${1}}")
+        options=("${options[@]:${1}}")
+    fi
+    [ "${#COMP_WORDS[@]}" -le 2 ] || \
+        for opt in "${COMP_WORDS[@]:1:$((${COMP_CWORD}-1))}" \
+        "${COMP_WORDS[@]:$((${COMP_CWORD}+1))}"; do
+            if w="$(grep -m 1 -swe "${opt}" < <(printf '%s\n' "${options[@]}") )" && \
+            ( [ -z "${2:-}" ] || \
+            ! grep -qswEe "${2}" <<< "${w}" ); then
+                wordlist+=( "${w}" )
+            fi
+        done
+    local IFS='|'; printf '%s\n' "${wordlist[*]}"
+}
+
+# Parse GNU style help output of the given command
+# excluding already used options.
+# @param $1  command; if "-", read from stdin and ignore second arg
+# @param $2  command options (default: --help)
+# @param $3  The options up to this line number are positional
+#            and are already in use,
+#            this parameter may be omitted
+# @param $4  This regexp lists the options that can be specified
+#            multiple times, i.e.: "--opt1|--opt2|--opt3",
+#            this parameter may be omitted
+_parse_help_exclude()
+{
+    local helptext="$(_parse_help_text "${1}" "${2:-}")"
+    local exclude="$(_parse_options_exclude "${3:-}" "${4:-}" <<< "${helptext}")"
+    [ -n "${exclude}" ] && \
+        _parse_help_lines <<< "${helptext}" | \
+            grep -vsE -e "^(${exclude//=/})\b" || \
+        _parse_help_lines <<< "${helptext}"
+}
+
+# Parse GNU style help output of the given command.
+# @param $1  command; if "-", read from stdin and ignore rest of args
+# @param $2  command options (default: --help)
+#
+_parse_help()
+{
+    _parse_help_text "${1}" "${2:-}" | \
+        _parse_help_lines
+}

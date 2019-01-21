@@ -1,0 +1,19 @@
+## live-net-initramfs - System Configuration Components
+##
+## live-net-initramfs contains the components that configure a live system during
+## the boot process (late userspace).
+##
+
+[Unit]
+Description=Services-spool tasks slice.
+Documentation=man:live-net-initramfs
+DefaultDependencies=no
+Before=slices.target
+Wants=-.slice
+After=-.slice
+Wants=service.slice
+After=service.slice
+
+[Slice]
+CPUWeight=500
+X-ControlGroupAttribute=cpu.policy:batch

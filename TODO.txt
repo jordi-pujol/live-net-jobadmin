@@ -1,0 +1,99 @@
+  * TODO:
+  jobadmin-flashgot:
+  by now the best downloader is aria2c.
+  we have not set yet:
+   --dht-listen-port=port
+   --bt-external-ip=<IPADDRESS>
+
+  wget options --continue and --start-pos are incompatible,
+  curl and wget must compute start-pos to continue an interrupted partial download.
+  test wget behaviour downloading meta4|metalink files
+**********************************************
+  * TODO:
+  exec systemd-inhibit as a subprocess of their job
+  and the jobadmin daemon should wait
+   for this job end
+   notify the users,
+   on job error must hold the job queue.
+
+Comment- jobadmin checks activity by doing a list of active jobs;
+  systemd-inhibit is enabled as a semaphore for other power commands
+  that do not depend on jobadmin.
+**********************************************
+  * TODO:
+cron jobs to purge spool files or jobs older than a number of days
+**********************************************
+  * TODO:
+  System-wide templates for jobs.
+  Create user jobs based on system templates.
+**********************************************
+  * TODO:
+  parse system configuration to detect the combination of keys needed
+  to open a new tab in the current xterm.
+# sed -nre '\|\[shortcut\]|,\|^[[:blank:]]*$| {\|^new_tab_accel=(.*)| s||\1|p}' ~/.config/lxterminal/lxterminal.conf
+# <CTRL><SHIFT>T
+# .config/xfce4/terminal/accels.scm
+# ;(gtk_accel_path "<Actions>/terminal-window/new-tab" "<Primary><Shift>t")
+# .config/xfce4/terminal/terminalrc
+# AccelNewTab=
+**********************************************
+  * TODO:
+  Spool management.
+  - test printing to a writer
+**********************************************
+
+
+**********************************************
+Weird idea: Implement job scheduling, internal in jobadmin,
+    User input for cron.
+  * TODO:
+    - add functionality for job schedule
+    - three new fields:
+    date/time schedule: ja_datetime
+    date schedule: ja_date
+    time schedule: ja_time
+      add that field to commands and write it to the usr/jobs.scd index files.
+    - getopt-sh
+    new parameters types: date, time, date-time
+    ¿ US english only, may parse dates in the local language ??
+
+Parse dates according to local settings for each user.
+
+export LC_ALL=ca_ES.UTF-8 ; date '+%d-%b-%y %H:%M:%S'
+24-set-15 18:15:49
+
+export LC_ALL=ca_ES.UTF-8 ; date '+%d-%b-%y %H:%M:%S' --date='24-set-15 18:15:49'
+not valid, english only
+***
+# LC_ALL=en_US.UTF-8 locale -k LC_TIME
+abday="Sun;Mon;Tue;Wed;Thu;Fri;Sat"
+day="Sunday;Monday;Tuesday;Wednesday;Thursday;Friday;Saturday"
+abmon="Jan;Feb;Mar;Apr;May;Jun;Jul;Aug;Sep;Oct;Nov;Dec"
+mon="January;February;March;April;May;June;July;August;September;October;November;December"
+am_pm="AM;PM"
+d_t_fmt="%a %d %b %Y %r %Z"
+d_fmt="%m/%d/%Y"
+t_fmt="%r"
+t_fmt_ampm="%I:%M:%S %p"
+era=
+era_year=""
+era_d_fmt=""
+alt_digits=
+era_d_t_fmt=""
+era_t_fmt=""
+time-era-num-entries=0
+time-era-entries="S"
+week-ndays=7
+week-1stday=19971130
+week-1stweek=7
+first_weekday=1
+first_workday=2
+cal_direction=1
+timezone=""
+date_fmt="%a %b %e %H:%M:%S %Z %Y"
+time-codeset="UTF-8"
+***
+$ LC_ALL=en_US.UTF-8 locale -c mon
+LC_TIME
+January;February;March;April;May;June;July;August;September;October;November;December
+**********************************************

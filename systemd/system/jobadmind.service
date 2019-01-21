@@ -1,0 +1,14 @@
+[Unit]
+Description=Live never ending Tale- Linux jobs manager
+Documentation=man:jobadmind(1)
+After=printer.target lnet-services.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/jobadmind --daemon
+StandardOutput=journal
+Group=adm
+Slice=system-ctl.slice
+
+[Install]
+WantedBy=basic.target

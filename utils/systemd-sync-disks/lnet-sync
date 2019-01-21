@@ -1,0 +1,43 @@
+#!/bin/busybox ash
+
+#
+# synchronize all disks data
+# and remount all partitions read only when requested.
+#
+# Author: Jordi Pujol Palomer <jordipujolp@gmail.com>
+# Date:   Sun, 26 Mar 2017 05:57:25 +0200
+#
+
+_disks() {
+	local p d
+	for p in $(ls -1 /dev/disk/by-partuuid/* 2> /dev/null); do
+		d="$(readlink -f "${p}")"
+		test -b "${d}" && \
+		awk -v d="${d}" \
+		'$10 == d {print $6; exit}' < /proc/1/mountinfo | \
+		grep -qswe "rw" || \
+			continue
+		echo "${d}"
+	done
+}
+
+_sync() {
+	local mode="${1:-"rw"}"
+	local d rc=1
+	while [ ${rc} = 1 ]; do
+		rc=0
+		sync
+		echo 3 > /proc/sys/vm/drop_caches
+		[ "${mode}" != "ro" ] || \
+			for d in $(_disks); do
+				mount -o remount,ro "${d}" || rc=1
+			done
+	done
+}
+
+# executing a custom busybox program.
+# setting busybox preference for internal applets
+export PATH=
+
+_sync "${@}"
+:

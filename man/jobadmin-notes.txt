@@ -1,0 +1,136 @@
+OS/400 object oriented operating system.
+
+on the AS/400 everything is an object, except the job that exist only while it is a task to be executed by a subsystem.
+
+AS/400 objects share similarities with objects in object-oriented programming, but there are differences as well. OS/400 is sometimes described as object-based instead of object oriented.
+
+There are similarities in that when storage is allocated for something, that something is of a specific type, and only a specific set of programs are allowed to act upon that object. There are differences in that even though the AS/400 supports Java and C++, AS/400 objects cannot be inherited like the classes in those languages. Another difference is that the set of object types in OS/400 (the AS/400's operating system) is fixed by IBM, and only IBM has the ability to create new ones.
+
+The number of object types is huge and a small subset of them are available to users. The human readable form of the object type is always a three to six character mnemonic preceded by an asterisk. What follows is a short list of the more commonly used objects and their mnemonics:
+
+    *MODULE: Module (linkable into a program from a compiled language above and here too there are no restrictions on linkability between languages).
+    *CMD: Command (an object used for calling programs that allows users to prompt for their parameters; can be created with the Command Definition language). See AS/400 Control Language for more information.
+    *MENU: Menu (accessed with the GO command).
+    *JOBD: Job description (used when submitting/starting jobs).
+    *SBSD: Subsystem description (used when starting subsystems; this is the place where user jobs run).
+    *JOBQ: Job queue (used to queue up batch jobs to run in a subsystem).
+    *MSGQ: Message queue (used to send message to users, can also be used like a data queue).
+    *OUTQ: Output queue (used to queue up output to a printer).
+    *RWTR: Remote writer (a printer managed by a printing daemon, like CUPS).
+
+changing objects is done by prompting commands preceded by "CHG" (CHGJOBD, CHGUSRPRF, etc.), deleting an object uses "DLT" (DLTJOBD, DLTUSRPRF, etc.), displaying an object uses "DSP" (DSPJOBD, DSPUSRPRF, etc.), and working with a set of objects uses "WRK" (WRKJOBD, WRKUSRPRF, etc.).
+
+Similarly  To view a log of a job use the DSPJOBLOG command.
+WRKACTJOB can be used to view jobs in multiple points of view.
+The AS/400 command structure focuses on ease of use.
+
+In order to view all the objects that the verb portion of an AS/400 command can work ("WRK") upon the "go cmdWRK" where "WRK" may be any of the verbs current and future "CHG","DLT","DSP","EDT","INZ","PRT" etc.
+
+Parameters for the command can be displayed by simply typing the command name and pressing F4 or by typing the command name on an AS/400 command line. This will prompt a standard SAA panel providing prompt information for each parameter the command can accept. The command string can be displayed at any point during prompting by pressing F1u2, which if used to exit from the command prompting can be utilized by the F9=Retrieve previous command.
+A help summary for the command and its parameters can be obtained by pressing F1.
+
+Creating an object usually (but not always) involves a command that begins with the mnemonic "CRT". So, to create a job description you would prompt the CRTJOBD command. User profiles would be created with the CRTUSRPRF command. 
+
+This command structure and strict adherence to the S.A.A. standards make the AS/400 extremely easy to use from at command level and also to develop source files containing commands. Commands may be executed interactively or placed in text files and executed in sequence or can be compiled into an AS/400 object of type *PGM, with a type-attribute of CLP.
+
+*********************************************
+Gestión de Trabajos.
+
+Jobadmin controla el proceso de los trabajos que se ejecutan en el sistema.
+Un trabajo es la definición de una tarea que el sistema va a procesar; 
+no debemos confundirlo con una descripción de trabajo.
+
+Un usuario puede definir un trabajo y someterlo al sistema para su 
+ejecución; Jobadmin le asignará el tiempo de proceso y los recursos 
+adecuados para llevar a cabo la tarea y al mismo tiempo mantener la 
+disponibilidad y el buen rendimiento del sistema.
+
+Jobadmin define varios tipos de trabajos, por ejemplo:
+
+- los trabajos interactivos que están conectados con un terminal de 
+texto o gráfico y presentan texto o ventanas gráficas en él.
+- los trabajos batch, que no disponen de un terminal físico pero pueden 
+interactuar con el usuario a través de la aplicación "screen"
+- trabajos de comunicaciones
+- trabajos de control del sistema
+
+Subsistema.
+
+Un subsistema es un entorno de proceso que dispone de unos recursos de 
+proceso, comunicaciones, espacio de disco, que han sido definidos 
+previamente por el superusuario.
+
+El subsistema está relacionado con otros tipos de objetos tales como 
+los trabajos, las descripciones de trabajo, las clases de servicio, 
+colas de trabajos, colas de salida, ...
+
+Trabajo.
+
+Definición de una tarea para procesar, determina 
+
+descripcion de trabajo
+
+clase de servicio
+
+cola de trabajos
+
+*********************************************
+AS/400 Command structure.
+
+One basic thing to understand about IBMi (AS400) command is how it is structured. Commands are build up in parts/groups. First 3 (or 4) letters will be a VERB eg: DSP for Display, WRK for work, CHG for change etc.; next 3–10 letters will be a SUBJECT eg: OBJ object, MSG message.
+
+The VERB and SUBJECT menus are part of what are called the Command Grouping Menus. For every Three (or four) Letter Acronym there is a menu devoted to it that starts with the letters CMD. So to see all CHG commands the user would execute the command GO CMDCHG. For program commands the menu would be CMDPGM.
+
+There are other menus besides the Command Grouping Menus. The starting point for the menuing system can be accessed by pressing F4 on an empty command line.
+
+Note: This starts the Command Line Screen. On the OS/400 command line, type the following:
+
+CALL QCMD Press the Enter key.
+
+To exit the Command Line Screen, press the F12 function key.
+
+Understanding this basic structure will help you in forming the commands yourself when you are not sure of the exact one. You can suffix a * (wildcard) on any commands and press enter to get the list of all of them. For eg: DSPM* will give the list of all commands starting with DSPM like DSPMOD, DSPMSG, DSPMSGD etc
+
+Commands can be for the interactive command lines as well as dedicated for programs. All these commands we just discussed are on the command line which user types in an interactive screen. There are commands that are only for programs like the RTVXXX - retrieve commands for CL.
+
+Another point to note is the OS version, new commands get added with new OS release. Some rare cases old commands get attribute changed, means the actual command itself will change with OS versions.
+
+Reference : AS/400 Quick Command List
+
+Commands in the Control Language (CL) are promptable using the keyboard F4 function key, and most provide cursor-sensitive help to make specifying command parameters simpler. All command names and parameter keywords are based upon uniform standardized and mostly 3-letter abbreviations for verbs and subjects, making for easy rendering and interpretation by the application developer, as opposed to other operating systems with often cryptic or inconsistent command names for related functions or command parameter switches. For instance, the parameter keyword to apply a text description to any object to be created or changed is spelled the same way for all such commands.
+
+*********************************************
+AS-400 dialog screens-
+
+Here are some general guidelines about working with this screen:
+
+    To use function keys above F12, press the Shift key simultaneously with a function key; for example, for F16 press Shift and F4.
+    Use the Tab key to move to the underscored areas that designate input, or click them with your mouse.
+    You will use F3 and F12 quite regularly to back out of a menu, to navigate back, or to “close” the screen you are on.
+    Press F1 on any field for context-sensitive help.
+    If you don’t know the name of a command, type the first few letters followed by an asterisk ( * ); for example, type STR* to list all the commands that start with STR.
+    To list the options of any command, type it and then press F4.
+    The name of the menus will sometimes be listed in blue in the upper-left; to return to them, enter GO MENUNAME.
+    Commands will also sometimes be listed at the top; to use that command again later, just enter the command.
+    To stop a command that is hung, right-click the screen, click SYSREQ, press Enter, and then use the Menu to end the command.
+
+AS-400 commands menu.
+    All commands are menu driven, or you can enter them on the command line.
+
+
+*********************************************
+Types of Jobs
+
+AS400 jobs can originate from several sources and are classified by how they originate on the system. In this course, and in general, you will deal mostly with two types of jobs: interactive and batch.
+
+interactive job
+An interactive job begins when a user signs on to an AS400 and it terminates when the user sign off the AS400 or the job is ended. Interactive jobs run in conversational mode, which means there is a dialogue of sorts between the user and the program, utility or operating system function. Because of this conversational, back-and-forth nature of interactive jobs, any CPU-or I/O-intensive request a user makes could lock up the workstation keyboard until the request is completed. Therefore, it is often advisable to direct such requests to a subsystem designed to handle them. That is, to submit them as batch jobs.
+
+Batch jobs
+Batch jobs can execute without user interaction; they do not require data or controlling values to be input through the workstation once they have started. Batch jobs are sent to a job queue until they can begin execution. A job queue is a staging area, managed by the subsystem in which the job will run, where batch jobs wait in line for their turn at processing. Each batch subsystem can execute only a limited number of batch jobs concurrently. If no other higher-priority jobs are waiting, a batch job can start right away; otherwise, it must wait its turn. Batch jobs may also be held until a certain time of day. For example, a given batch job may be automatically run each night at 11:00 p.m. An example of such a batch job would be the nightly deletion of work files before a system backup.
+
+*********************************************
+Create a Job
+
+An user creates a Job with a command "sbmjob"
+

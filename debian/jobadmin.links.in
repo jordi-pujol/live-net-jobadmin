@@ -1,0 +1,9 @@
+#!/bin/bash
+
+printf '/usr/bin/jobadmin\t\t/usr/bin/%s\n' \
+	$(basename -s '.module' lib/*.module | \
+	grep -v jobadmin)
+#
+printf '%s\t%s\n' \
+	"/usr/sbin/jobadmin-notifier" \
+	"/usr/lib/cups/notifier/janotifier"

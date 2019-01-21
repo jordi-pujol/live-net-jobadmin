@@ -1,0 +1,63 @@
+#!/bin/bash
+
+#  Jobs management application for the Linux OS
+#  $Revision: 1.66 $
+#
+#  Copyright (C) 2008-2017 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This file is part of the LneT Jobadmin package,
+#   http://livenet.ddns.net .
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 1, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#  Please report bugs to <jordipujolp AT gmail DOT com>.
+#
+#
+#************************************************************************
+
+# dltsplf
+
+_dltsplf_options="JA_SPLF pr@
+JA_JOB pr@
+JA_USR@
+JA_PID"
+
+_dltsplf() {
+	local dataf fd1
+
+	if ! _test_rw "${JA_SPLF_ATTRS}"; then
+		_usr_notify "Error: Not authorized to delete spool file '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}'."
+		return 1
+	fi
+
+#	sts="$(_read_option "JA_SPLF_STS" "${JA_SPLF_ATTRS}")" || sts="RDY"
+#	if kill -0 "${JA_PID}" > /dev/null 2>&1 && \
+#	[ "${sts}" != "RDY" ] && \
+#	[ "${sts}" != "SAV" ]; then
+#		_usr_notify "Error: spool file '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}' can't be deleted, current status '${sts}'."
+#		return 1
+#	fi
+	( if ! flock --exclusive --timeout 1 ${fd1}; then
+		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
+		return 1
+	fi
+	dataf="$(dirname "${JA_SPLF_ATTRS}")/$(_read_option "JA_SPLF" "${JA_SPLF_ATTRS}")"
+	rm -f "${dataf}" "${JA_SPLF_ATTRS}"
+	[ ! -s "${JA_USR_DIR}${JA_USR_SCDSPLFS}" ] || \
+		printf '%s\n' "g/^${JA_JOB} ${JA_SPLF}$/d" 'w' | \
+			ed -s "${JA_USR_DIR}${JA_USR_SCDSPLFS}" || :
+	_usr_notify "Removing spool file '${JA_SPLF} ${JA_JOB}.${JA_USR}.${JA_PID}'."
+	) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
+} # dltsplf

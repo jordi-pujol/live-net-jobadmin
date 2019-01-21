@@ -1,0 +1,98 @@
+#!/bin/bash
+
+### BEGIN INIT INFO
+# Provides:        jobadmind
+# Required-Start:  $syslog cups
+# Required-Stop:   $remote_fs $syslog lnet-firewall
+# X-Stop-Before:   $network
+# Should-Start:    cups
+# Should-Stop:     cups
+# Default-Start:   2 3 4 5
+# Default-Stop:    0 1 6
+# Short-Description: Batch job management service.
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin
+
+. /lib/lsb/init-functions
+
+NAME="jobadmind"
+DESCRIPTION="Batch job management service."
+JA_PIDFILE="/var/run/${NAME}.pid"
+
+test -x "${JA_DAEMON:="$(which "${NAME}")"}" || exit 5
+
+if [ -r "/etc/default/$NAME" ]; then
+	. "/etc/default/$NAME"
+fi
+if [ ! -r "${JA_CONF}" ]; then
+	log_failure_msg "${DESCRIPTION}: config file not found."
+	exit 1
+fi
+if [ "${JA_DISABLED}" = "yes" ]; then
+	log_failure_msg "${DESCRIPTION}: not enabled to start in \"/etc/default/${NAME}\"."
+	exit 1
+fi
+
+do_status () {
+	[ -r "${JA_PIDFILE}" ] && \
+		pidofproc -p "${JA_PIDFILE}" "${JA_DAEMON}" > /dev/null 2>&1
+	status="${?}"
+	[ "${status}" -ne "0" -a -r "${JA_PIDFILE}" ] && \
+		rm -f "${JA_PIDFILE}" > /dev/null 2>&1
+	return "${status}"
+}
+
+case "${1}" in
+	start)
+		if do_status; then
+			log_warning_msg "${DESCRIPTION} is already running."
+			exit 0
+		else
+			log_daemon_msg "Starting ${DESCRIPTION}" "${NAME}"
+			start-stop-daemon --start --quiet --oknodo \
+				--group adm \
+				--background --pidfile "${JA_PIDFILE}" --make-pidfile \
+				--exec "${JA_DAEMON}" -- \
+				--daemon
+			log_end_msg $?
+		fi
+		;;
+	stop)
+		if do_status; then
+			log_daemon_msg "Submitting stop request to the daemon: ${DESCRIPTION}" "${NAME}"
+			start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 \
+				--pidfile "${JA_PIDFILE}" --startas "${JA_DAEMON}"
+			log_end_msg 0
+			exit 0
+		fi
+		log_warning_msg "${DESCRIPTION} is not running."
+		exit 0
+		;;
+	restart)
+		$0 stop
+		waiting=0
+		while do_status && [ ${waiting} -lt 10 ]; do
+			sleep 1
+			waiting=$((${waiting}+1))
+		done
+		$0 start
+		exit "${?}"
+		;;
+	status)
+		do_status
+		status="${?}"
+		if [ $status -eq 0 ]; then
+			log_success_msg "${DESCRIPTION} is running."
+		else
+			log_failure_msg "${DESCRIPTION} is not running."
+		fi
+		"${JA_DAEMON}" --status
+		exit "${status}"
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|status}" >&2
+		exit 2
+		;;
+esac
+:

@@ -1431,8 +1431,8 @@ _jobadmin_jobs_check() {
 					"for subsystem description ${sbsd}."
 				continue
 			fi
-			if slice_dirs="$(awk '$1 == "cgroup" && $2 !~ "/systemd$" {
-			print $2; rc=-1}
+			if slice_dirs="$(awk '$1 ~ "^cgroup" && $2 !~ "/systemd$" {
+			print $2; rc=-1; exit}
 			END{exit rc+1}' < /proc/mounts)" && \
 			[ -n "$(find ${slice_dirs} \
 			-name "${cls_cgrp}.slice" -type d)" ]; then

@@ -145,7 +145,11 @@ if [ -d "/run/systemd/system" ]; then
 	JA_CMD_HALT_IMMED='systemctl halt --ignore-inhibitors'
 	JA_CMD_REBOOT='systemctl reboot'
 	JA_CMD_REBOOT_IMMED='systemctl reboot --ignore-inhibitors'
-	if grep -qswe 'disk' /sys/power/state; then
+	if grep -qswe 'disk' /sys/power/state && \
+	grep -qswE "mem|standby|freeze" /sys/power/state; then
+		JA_CMD_HIBERNATE='systemctl hybrid-sleep'
+		JA_CMD_HIBERNATE_IMMED='systemctl hybrid-sleep --ignore-inhibitors'
+	elif grep -qswe 'disk' /sys/power/state; then
 		JA_CMD_HIBERNATE='systemctl hibernate'
 		JA_CMD_HIBERNATE_IMMED='systemctl hibernate --ignore-inhibitors'
 	else

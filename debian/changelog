@@ -1,3 +1,9 @@
+jobadmin (1.79) unstable; urgency=medium
+
+  * prefer system suspend to hybrid-sleep instead of hibernate.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 02 Jul 2019 16:57:19 +0200
+
 jobadmin (1.78) unstable; urgency=medium
 
   * detect also the mount point of cgroups v2.

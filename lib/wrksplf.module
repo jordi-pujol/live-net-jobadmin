@@ -42,10 +42,10 @@ JA_SEQ"
 _wrksplf_chgview() {
 	case "${JA_SEQ}" in
 	2)
-		JA_DIALOG_FIELDS="Opt:3:2 Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19 Out_Queue:15"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19 Out_Queue:15"
 		;;
 	*)
-		JA_DIALOG_FIELDS="Opt:3:2 OutQ/Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19"
+		JA_DIALOG_FIELDS="Opt:3:2:3 OutQ/Splf:35 Stat:10 Act/Request:15 Pri:3. Date:19"
 		JA_SEQ=1
 		;;
 	esac
@@ -212,7 +212,7 @@ _wrksplf() {
 			m="$(_print_line "${i}" <<< "${M}")"
 			case "${JA_SEQ}" in
 			2)
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${f1}" \
 					"${f2}" \
 					"${f3}" \
@@ -221,7 +221,7 @@ _wrksplf() {
 					"${f6}")"
 				;;
 			*)
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${f1}" \
 					"${f2}" \
 					"${f3}" \

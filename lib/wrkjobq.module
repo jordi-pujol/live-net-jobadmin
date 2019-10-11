@@ -44,11 +44,11 @@ JA_SEQ"
 _wrkjobq_chgview() {
 	case "${JA_SEQ}" in
 	2)
-		JA_DIALOG_FIELDS="Opt:3:2 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Job_Queue:15"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Job_Queue:15"
 		;;
 	*)
 		JA_SEQ=1
-		JA_DIALOG_FIELDS="Opt:3:2 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Execs:30"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Job_Name:30 Status:8 Pri:3. Time_Submit:19 Execs:30"
 		;;
 	esac
 }
@@ -108,7 +108,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 			case "${JA_SEQ}" in
 			2)
 				local hld="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")" || :
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${job}.${usr}${job_pid:+".${job_pid}"}" \
 					"${sts}" \
 					"${pty}" \
@@ -116,7 +116,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 					"${jobq}$(test "${jobq_sts}" = "-" || printf '%s' "/${jobq_sts}")")"
 				;;
 			*)
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${job}.${usr}${job_pid:+".${job_pid}"}" \
 					"${sts}" \
 					"${pty}" \

@@ -41,13 +41,13 @@ JA_SEQ p"
 _wrkactjob_chgview() {
 	case "${JA_SEQ}" in
 	2)
-		JA_DIALOG_FIELDS="Opt:3:2 Subsystem/Job:30 Stat:10 MaxJ:5. ActvJ:5. Pri:3. Date:19 Job_Queue:15"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Subsystem/Job:30 Stat:10 MaxJ:5. ActvJ:5. Pri:3. Date:19 Job_Queue:15"
 		;;
 	3)
-		JA_DIALOG_FIELDS="Opt:3:2 Subsystem/Job:30 Stat:10 M/CPU:6. A/Mem:6. Pri:3. Date:19 Job_Queue/Cmds:20"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Subsystem/Job:30 Stat:10 M/CPU:6. A/Mem:6. Pri:3. Date:19 Job_Queue/Cmds:20"
 		;;
 	*)
-		JA_DIALOG_FIELDS="Opt:3:2 Subsystem/Job:30 Stat:10 MaxJ:5. ActvJ:5. Pri:3. Date:19"
+		JA_DIALOG_FIELDS="Opt:3:2:3 Subsystem/Job:30 Stat:10 MaxJ:5. ActvJ:5. Pri:3. Date:19"
 		JA_SEQ=1
 		;;
 	esac
@@ -286,7 +286,7 @@ _wrkactjob() {
 						f4="0%"
 					fi
 				fi
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${f1}" \
 					"${f2}" \
 					"${f3}" \
@@ -296,7 +296,7 @@ _wrkactjob() {
 					"${f7}")"
 				;;
 			2)
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${f1}" \
 					"${f2}" \
 					"${f3}" \
@@ -306,7 +306,7 @@ _wrkactjob() {
 					"${f7}")"
 				;;
 			*)
-				DIALOG="${DIALOG}$(_dialog_line "${m}" \
+				DIALOG="${DIALOG}$(_dialog_line "${i}" "${m}" \
 					"${f1}" \
 					"${f2}" \
 					"${f3}" \

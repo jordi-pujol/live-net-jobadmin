@@ -1,6 +1,6 @@
 jobadmin (1.80) unstable; urgency=medium
 
-  * display the order number for lines of interactive subfiles
+  * in interactive subfiles display the order number of each line
     as the label of the option field.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 10 Oct 2019 15:36:57 +0200

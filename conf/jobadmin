@@ -138,31 +138,66 @@ readonly JA_CGEXEC JA_CGEXEC_INTER
 
 # please comment out the actions that should not be performed in this computer.
 # https://www.kernel.org/doc/Documentation/power/states.txt
+
+# select suspend to RAM mode, NOT required
+#   echo deep > /sys/power/mem_sleep
+#   echo s2idle > /sys/power/mem_sleep
+# suspend to RAM
+#   echo platform > /sys/power/disk; echo freeze > /sys/power/state
+# hybrid-suspend
+#   echo suspend > /sys/power/disk; echo disk > /sys/power/state
+# hibernate
+#   echo platform > /sys/power/disk; echo disk > /sys/power/state
+
 if [ -d "/run/systemd/system" ]; then
+	#JA_HIBERNATE="hibernate"
+	JA_HIBERNATE="hybrid-sleep"
+	#JA_SUSPEND="suspend"
+	JA_SUSPEND="hybrid-sleep"
+
 	JA_CMD_POWEROFF='systemctl poweroff'
 	JA_CMD_POWEROFF_IMMED='systemctl poweroff --ignore-inhibitors'
 	JA_CMD_HALT='systemctl halt'
 	JA_CMD_HALT_IMMED='systemctl halt --ignore-inhibitors'
 	JA_CMD_REBOOT='systemctl reboot'
 	JA_CMD_REBOOT_IMMED='systemctl reboot --ignore-inhibitors'
-	if grep -qswe 'disk' /sys/power/state && \
-	grep -qswE "mem|standby|freeze" /sys/power/state; then
-		JA_CMD_HIBERNATE='systemctl hybrid-sleep'
-		JA_CMD_HIBERNATE_IMMED='systemctl hybrid-sleep --ignore-inhibitors'
-	elif grep -qswe 'disk' /sys/power/state; then
-		JA_CMD_HIBERNATE='systemctl hibernate'
-		JA_CMD_HIBERNATE_IMMED='systemctl hibernate --ignore-inhibitors'
-	else
-		JA_CMD_HIBERNATE=""
-		JA_CMD_HIBERNATE_IMMED=""
-	fi
-	if grep -qswE "mem|standby|freeze" /sys/power/state; then
-		JA_CMD_SUSPEND='systemctl suspend'
-		JA_CMD_SUSPEND_IMMED='systemctl suspend --ignore-inhibitors'
-	else
-		JA_CMD_SUSPEND=""
-		JA_CMD_SUSPEND_IMMED=""
-	fi
+
+	# hibernate
+	JA_CMD_HIBERNATE="systemctl ${JA_HIBERNATE}"
+	JA_CMD_HIBERNATE_IMMED="systemctl ${JA_HIBERNATE} --ignore-inhibitors"
+	#JA_CMD_HIBERNATE="echo platform > /sys/power/disk; echo disk > /sys/power/state"
+	#JA_CMD_HIBERNATE_IMMED="${JA_CMD_HIBERNATE}"
+	# hybrid-suspend
+	#JA_CMD_HIBERNATE="echo suspend > /sys/power/disk; echo disk > /sys/power/state"
+	#JA_CMD_HIBERNATE_IMMED="${JA_CMD_HIBERNATE}"
+
+	JA_CMD_SUSPEND="systemctl ${JA_SUSPEND}"
+	JA_CMD_SUSPEND_IMMED="systemctl ${JA_SUSPEND} --ignore-inhibitors"
+	# suspend
+	#JA_CMD_SUSPEND="echo platform > /sys/power/disk; echo freeze > /sys/power/state"
+	#JA_CMD_SUSPEND_IMMED="${JA_CMD_SUSPEND}"
+	# hybrid-suspend
+	#JA_CMD_SUSPEND="echo suspend > /sys/power/disk; echo disk > /sys/power/state"
+	#JA_CMD_SUSPEND_IMMED="${JA_CMD_HIBERNATE}"
+
+#	if grep -qswe 'disk' /sys/power/state && \
+#	grep -qswE "mem|standby|freeze" /sys/power/state; then
+#		JA_CMD_HIBERNATE="systemctl ${JA_HIBERNATE}"
+#		JA_CMD_HIBERNATE_IMMED="systemctl ${JA_HIBERNATE} --ignore-inhibitors"
+#	elif grep -qswe 'disk' /sys/power/state; then
+#		JA_CMD_HIBERNATE='systemctl hibernate'
+#		JA_CMD_HIBERNATE_IMMED='systemctl hibernate --ignore-inhibitors'
+#	else
+#		JA_CMD_HIBERNATE=""
+#		JA_CMD_HIBERNATE_IMMED=""
+#	fi
+#	if grep -qswE "mem|standby|freeze" /sys/power/state; then
+#		JA_CMD_SUSPEND='systemctl suspend'
+#		JA_CMD_SUSPEND_IMMED='systemctl suspend --ignore-inhibitors'
+#	else
+#		JA_CMD_SUSPEND=""
+#		JA_CMD_SUSPEND_IMMED=""
+#	fi
 elif [ -x "/usr/sbin/pm-hibernate" ]; then # pm
 	JA_CMD_POWEROFF='poweroff'
 	JA_CMD_HALT='shutdown -h now'
@@ -195,6 +230,9 @@ elif grep -qswe freeze /sys/power/state; then \
 echo platform > /sys/power/disk && echo freeze > /sys/power/state; \
 fi'
 fi
+readonly JA_CMD_POWEROFF JA_CMD_POWEROFF_IMMED JA_CMD_HALT JA_CMD_HALT_IMMED \
+	JA_CMD_REBOOT JA_CMD_REBOOT_IMMED JA_CMD_HIBERNATE JA_CMD_HIBERNATE_IMMED \
+	JA_CMD_SUSPEND JA_CMD_SUSPEND_IMMED
 
 # to poweroff detect active X screensaver, returns true or false
 # qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SetActive true
@@ -202,8 +240,7 @@ fi
 #JA_CMD_XSAVER='qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
 JA_CMD_XSAVER='qdbus org.kde.krunner /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
 
-readonly JA_CMD_POWEROFF JA_CMD_HALT JA_CMD_REBOOT JA_CMD_HIBERNATE \
-	JA_CMD_SUSPEND JA_CMD_XSAVER
+readonly JA_CMD_XSAVER
 
 # cups server
 JA_CUPS_SERVER=""

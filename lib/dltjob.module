@@ -88,19 +88,22 @@ _dltjob() {
 				ed -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" || :
 			_usr_notify "Removing job '${JA_JOB}.${JA_USR}'."
 		else
-			attrs="${JA_USR_DIR}${JA_JOB}.job/job.attrs"
-			if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
-				for job_pid in $(tr -s ' ' '\n' <<< "${job_pids}" | \
-				head --lines="-${JA_KEEP}" | \
-				cut -f 1 -d ':'); do
-					_dltjob_by_pid "${job_pid}"
-				done
-			else
-				_usr_notify "Warning: no executions exist for '${JA_JOB}.${JA_USR}'."
-			fi
+			( set +o noglob 
+			while read -r job_cmd; do
+				rm -f "${job_cmd%".cmd"}"[.-]*
+			done < <( ls -1c "${JA_JOB_DIR}job-"*.cmd | \
+			head -q --lines=-${JA_KEEP} ) )
+
+			attrs="${JA_JOB_DIR}job.attrs"
+			_set_option "${attrs}" "JA_PIDS" \
+				"$(_read_option "JA_PIDS" "${attrs}" | \
+				awk -v ja_keep=${JA_KEEP} \
+				'{for (i=ja_keep+1; i<=NF; i++) $i=""
+				gsub(/^[[:blank:]]+|[[:blank:]]+$/, "")
+				print}')"
 		fi
 	else
-		attrs="${JA_USR_DIR}${JA_JOB}.job/job.attrs"
+		attrs="${JA_JOB_DIR}job.attrs"
 		if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
 			for job_pid in $(tr -s ',' ' ' <<< "${JA_PIDL}"); do
 				_dltjob_by_pid "${job_pid}"

@@ -59,14 +59,12 @@ _dspjob() {
 		awk 'NR == 2 && $0 != "# jobadmin script" {print "Custom script"; exit}
 NR == 3' "${JA_JOB_DIR}job.cmd"
 		printf '\n%s\n' "Spool files:"
-		while read splf d h; do
+		while read splf; do
 			[ -e "${splf}" ] || continue
-			printf '%s ' "$(_splf_name "${splf}")" "${d}" "${h%.*}"
-			printf '\n'
-		done < <(find "${JA_JOB_DIR}" -type f \
--name "*.splfa" \
--printf '%p %Ad%Ab%AY %AX\n' | \
-sort -k 2,2 -k 3,3 -k 1,1)
+			printf '%s %s\n' "$(basename "${splf}")" \
+				"$(date +'%Y-%m-%d %H:%M:%S' --date=@$(stat -c '%Y' "${splf}"))"
+		done < <( ( set +o noglob
+			(ls -1c "${JA_JOB_DIR}"*.splfa 2> /dev/null) ) )
 		if [ -n "${JA_PID}" ]; then
 			printf '\n%s\n\n' "Job execution '${JA_JOB}.${JA_USR}.${JA_PID}'"
 			_printvars "${JA_JOB_DIR}job-${JA_PID}.attrs"

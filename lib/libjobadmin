@@ -282,61 +282,135 @@ _usr_scdjobs_remove() {
 	fi ) {fd1}< "$(_flock_lckfile "${scdjobs}")"
 }
 
-# Help, first line contains tag "help" and last the keycode
+# Help, first line contains tag "HELP label" and last one the keycode
 _help_cmds() {
-	cmd_options="$(head --lines=1 < <(tail --lines=2 <<< "${M}"))"
-	M="$(head --lines=-2 < <(tail --lines=+2 <<< "${M}") | \
-		tr '[:upper:]' '[:lower:]' | \
-		sed -re '\|^[[:blank:]]+| s|||
-		\|[[:blank:]]+$| s|||')"
+	_usr_notify "$(_usage 2>&1)" "" "y"
+	_usr_notify "$(awk '$5 != "-" && $6 != "-" {
+		print $2" "$6"="$1}' "${JA_CONF_CMDS}" | sort | \
+		awk 'BEGIN{a = ""} {
+		printf $2", "
+		if (a != "" && $1 != a) {
+		a = "$1"
+		printf "\n"}}
+		END{printf "\n"}')" "" "y"
+}
+
+_interactive_dialog() {
+	line=$((line+1))
+	DIALOG="${DIALOG}$(_dialog_options "${cmd_options}" "Parms-Cmd")"
+	rc=0
+	M="$(_dialog_exec "${JA_CONF_DLG}")" || \
+		rc="${?}"
+
+	case "${rc}" in
+	1|255) # 1=Cancel 255=Esc or ERR, does not contain keycode
+		rc=0
+		return 1
+		;;
+	esac
+
+	if [ ${rc} -eq 2 ]; then
+		JA_DIALOG_LABEL="$(awk 'NR == 1 {if ($1 == "HELP") print $2; exit}' <<< "${M}")"
+		M="$(sed '2,$!d' <<< "${M}")"
+	else
+		JA_DIALOG_LABEL=""
+	fi
+
+	lastkey="$(_print_line ${line} <<< "${M}")"
+	M="$(_print_line "1,$((line-1))" <<< "${M}")"
 	_lastkey_detect "${lastkey}"
+
+	if [ -n "${JA_FKEY_END}" -o \
+	-n "${JA_FKEY_CANCEL}" ]; then
+		return 1
+	fi
+
+	cmd_options="$(_print_line "$((line-1))" <<< "${M}")"
+	M="$(_print_line "1,$((line-2))" <<< "${M}" | \
+		tr '[:upper:]' '[:lower:]')"
+
 	if [ -n "${JA_FKEY_AUTOREFRESH}" ]; then
 		autorefresh="$(test -n "${autorefresh}" || echo "y")"
-	elif [ -n "${JA_FKEY_DSPMSG}" ]; then
+		return 0
+	fi
+	if [ -n "${JA_FKEY_DSPMSG}" ]; then
 		if _cmd_dsc "dspmsg"; then
 			JA_CMD_ARGS=("--msgq" "$(basename "${JA_DIALOG_TAILBOXMSG}" ".msgq")")
 			_cmd_exec || :
 		fi
-	else
-		_usr_notify "$(_usage 2>&1)" "" "y"
-		_usr_notify "$(awk '$5 != "-" && $6 != "-" {
-			print $2" "$6"="$1}' "${JA_CONF_CMDS}" | sort | \
-			awk 'BEGIN{a = ""} {
-			printf $2", "
-			if (a != "" && $1 != a) {
-			a = "$1"
-			printf "\n"}}
-			END{printf "\n"}')" "" "y"
+		return 0
 	fi
-}
-
-# Extra-button/Refresh
-_extra_button() {
-	_wrk_options
-	if [ -n "${JA_FKEY_RETRIEVE}" ]; then
+	if [ -n "${JA_FKEY_REFRESH}" -o \
+	-n "${JA_FKEY_PARMS}" -o \
+	-n "${JA_FKEY_RETRIEVE}" -o \
+	-n "${JA_FKEY_CHGVIEW}" ]; then
 		if [ -z "${M//[[:blank:]$'\n']/}" ]; then
-			[ -n "${cmd_options}" ] || \
-				cmd_index=0
-			cmd_options="$(_cmd_retrieve)"
-			cmd_index="$((${cmd_index}+1))"
+			if [ -n "${JA_FKEY_RETRIEVE}" ]; then
+				[ -n "${cmd_options}" ] || \
+					cmd_index=0
+				cmd_options="$(_cmd_retrieve)"
+				cmd_index="$((${cmd_index}+1))"
+			elif [ -n "${cmd_options//[[:blank:]$'\n']/}" ]; then
+				_usr_notify "Can't refresh while there are pending options." \
+					"" "y"
+				return 1
+			fi
 		else
-			_usr_notify "Can't retrieve commands while there are pending options." \
+			_usr_notify "Can't modify display while there are pending options." \
 				"" "y"
 		fi
-	elif [ -n "${M//[[:blank:]$'\n']/}${cmd_options//[[:blank:]$'\n']/}" ]; then
-		_usr_notify "Can't refresh while there are pending options." \
-			"" "y"
-	else
-		if [ -n "${JA_FKEY_CHGVIEW}" ]; then
-			JA_SEQ=$((${JA_SEQ}+1))
-			_${JA_MODULE}_chgview
-			_${JA_MODULE}_refresh
-		elif [ -n "${JA_FKEY_PARMS}" ]; then
-			_jobadmin_parms_vars
-		else
-			_${JA_MODULE}_refresh
-		fi
+		return 0
 	fi
+	if [ -n "${JA_FKEY_REFRESH}" ]; then
+		JA_DIALOG_LABEL=""
+		return 0
+	fi
+	if [ -n "${JA_FKEY_ENTER}" -o \
+	-n "${JA_FKEY_ASSIST}" ]; then
+		if [ -n "${M}" ]; then
+			_${JA_MODULE}_OK
+		elif [ -n "${cmd_options}" ] && \
+		eval JA_CMD_ARGS=(${cmd_options}); then
+			if _cmd_dsc "${JA_CMD_ARGS[@]}"; then
+				unset JA_CMD_ARGS[0]
+				if [ -z "${JA_FKEY_CONFIRM}" -a \
+				"${JA_CMD_TERMINAL}" -lt 1 ]; then
+					if _cmd_exec_background; then
+						_${JA_MODULE}_refresh "y"
+					fi
+				else
+					if _cmd_exec; then
+						_${JA_MODULE}_refresh "y"
+					fi
+				fi
+			else
+				_cmd_exec_shell
+				_${JA_MODULE}_refresh "y"
+			fi
+		else
+			_${JA_MODULE}_refresh "y"
+		fi
+		return 0
+	fi
+	if [ -n "${JA_FKEY_CHGVIEW}" ]; then
+		JA_SEQ=$((${JA_SEQ}+1))
+		_${JA_MODULE}_chgview
+		_${JA_MODULE}_refresh
+		return 0
+	fi
+	if [ -n "${JA_FKEY_PARMS}" ]; then
+		_jobadmin_parms_vars
+		return 0
+	fi
+
+	case "${rc}" in
+	0)
+		_${JA_MODULE}_refresh
+		;;
+	2)
+		_help_cmds
+		;;
+	esac
 }
 
 _usr_notify() {
@@ -861,15 +935,6 @@ _job_exist_exec() {
 	:
 }
 
-_wrk_options() {
-	cmd_options="$(head --lines=1 < <(tail --lines=2 <<< "${M}"))"
-	M="$(head --lines=-2 <<< "${M}" | \
-		tr '[:upper:]' '[:lower:]' | \
-		sed -re '\|^[[:blank:]]+| s|||
-		\|[[:blank:]]+$| s|||')"
-	_lastkey_detect "${lastkey}"
-}
-
 _getopt_err_print() {
 	local result="${1}"
 	local getopt_err="${2}"
@@ -1383,6 +1448,7 @@ $((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
 --extra-button --extra-label Rfrsh${autorefresh:+":AUTO"} \
 --last-key \
 --colors \
+${JA_DIALOG_LABEL:+--default-item '${JA_DIALOG_LABEL}'} \
 --form '$(_dialog_header_form)' ${JA_DIALOG_HEIGHT} ${JA_DIALOG_WIDTH} $((${JA_DIALOG_HEIGHT}-8)) "
 }
 
@@ -1498,7 +1564,9 @@ _new_tab_cmd() {
 	WID="${WID:-"$(_window_active)"}" || \
 		return 1
 	xdotool windowactivate --sync "${WID}"
-	xdotool key --window "${WID}" --delay 1 "${JA_KEY_NEWTAB}" sleep 0.1
+	#xdotool key --window "${WID}" --delay 1 "${JA_KEY_NEWTAB}" sleep 0.1
+	xdotool key --delay 1 "${JA_KEY_NEWTAB}"
+	sleep 0.1
 
 	xkbmap="$(setxkbmap -query | \
 		sed -nre '\|^options| s||option|' \
@@ -1513,13 +1581,14 @@ _new_tab_cmd() {
 	xdotool windowactivate --sync "${WID}"
 	# typing an initial space will not save the command in the history
 	if [ "${#}" -eq 1 ]; then
-		xdotool type --window "${WID}" --delay 1 --clearmodifiers \
-			" ( ${1} ) && exit "
+		#xdotool type --window "${WID}" --delay 1 --clearmodifiers " ( ${1} ) && exit "
+		xdotool type --delay 1 --clearmodifiers " ( ${1} ) && exit "
 	else
-		xdotool type --window "${WID}" --delay 1 --clearmodifiers \
-			" ( $(_print_cmd "${@}") ) && exit "
+		#xdotool type --window "${WID}" --delay 1 --clearmodifiers " ( $(_print_cmd "${@}") ) && exit "
+		xdotool type --delay 1 --clearmodifiers " ( $(_print_cmd "${@}") ) && exit "
 	fi
-	xdotool key --window "${WID}" --delay 1 Return
+	#xdotool key --window "${WID}" --delay 1 Return
+	xdotool key --delay 1 Return
 	setxkbmap ${xkbmap}
 	:
 }
@@ -1857,10 +1926,41 @@ _options_reuse() {
 
 _lastkey_detect() {
 	local lastkey="${1}"
-	JA_FKEY_DSPMSG=""; JA_FKEY_END=""; JA_FKEY_ASSIST=""; JA_FKEY_REFRESH="";
-	JA_FKEY_PARMS=""; JA_FKEY_RETRIEVE=""; JA_FKEY_AUTOREFRESH="";
-	JA_FKEY_CONFIRM=""; JA_FKEY_CHGVIEW=""; JA_FKEY_CANCEL=""
+	JA_FKEY_ENTER=""; JA_FKEY_DSPMSG=""; JA_FKEY_HELP="";
+	JA_FKEY_END=""; JA_FKEY_CANCEL="";
+	JA_FKEY_ASSIST=""; JA_FKEY_REFRESH=""; JA_FKEY_AUTOREFRESH="";
+	JA_FKEY_PARMS=""; JA_FKEY_RETRIEVE="";
+	JA_FKEY_CONFIRM=""; JA_FKEY_CHGVIEW="";
+#* bindkey formfield F1 HELP
+#* bindkey formfield ^H HELP
+#* bindkey formfield F2 HELP
+# # toggle auto-refresh
+#* bindkey formfield F17 HELP
+# # refresh
+#* bindkey formfield F5 HELP
+#* bindkey formfield ^R HELP
+# # global parms
+#* bindkey formfield F6 HELP
+# # retrieve CMDS
+#* bindkey formfield F9 HELP
+# # Change view
+#* bindkey formfield F11 HELP
+# # assist
+#* bindkey formfield F4 HELP
+# # F10 is reserved for DEBUG purposes
+#* #bindkey formfield F10 OK 
+# bindkey formfield ^O HELP
+# bindkey formfield ^N HELP
+# # cancel
+#* bindkey formfield F3 HELP
+#* bindkey formfield F12 HELP
 	case "${lastkey}" in
+	10|14|15) # ^M or ^N or ^O
+		JA_FKEY_ENTER="Yes"
+		;;
+	265|8) # F1 or ^H
+		JA_FKEY_HELP="Yes"
+		;;
 	266) # F2
 		JA_FKEY_DSPMSG="Yes"
 		;;
@@ -1870,7 +1970,7 @@ _lastkey_detect() {
 	268) # F4
 		JA_FKEY_ASSIST="Yes"
 		;;
-	269) # F5
+	269|18) # F5 or ^R
 		JA_FKEY_REFRESH="Yes"
 		;;
 	270) # F6

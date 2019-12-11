@@ -859,6 +859,23 @@ _jobadmin_notify_loggedinusrs() {
 	:
 }
 
+_jobadmin_resume_offset() {
+	local sw_filename resume_offset
+	sw_filename="$(swapon -s | \
+		awk 'NR == 2 {print $1; rc=-1; exit}
+		END{exit rc+1}')" && \
+		[ -f "${sw_filename}" ] || \
+			return 0
+	resume_offset="$(filefrag -v "${sw_filename}" 2>&1 | \
+		awk '$1 == "0:" {print $4+0; rc=-1; exit}
+		END{exit rc+1}')" || \
+	resume_offset="$(hdparm --fibmap "${sw_filename}" 2>&1 | \
+		awk '$1 == "0" {print $2+0; rc=-1; exit}
+		END{exit rc+1}')" || \
+			return 0
+	echo "${resume_offset}" > /sys/power/resume_offset
+}
+
 _jobadmin_pwroff() {
 	local attrs pwr_restart \
 		delay urgency immed fd0
@@ -926,11 +943,13 @@ _jobadmin_pwroff() {
 			printf '%s\n' "${JA_CMD_REBOOT_IMMED:-"${JA_CMD_REBOOT}"}"
 		;;
 	SUSPEND)
+		_jobadmin_resume_offset
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_SUSPEND}" || \
 			printf '%s\n' "${JA_CMD_SUSPEND_IMMED:-"${JA_CMD_SUSPEND}"}"
 		;;
 	HIBERNATE)
+		_jobadmin_resume_offset
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_HIBERNATE}" || \
 			printf '%s\n' "${JA_CMD_HIBERNATE_IMMED:-"${JA_CMD_HIBERNATE}"}"

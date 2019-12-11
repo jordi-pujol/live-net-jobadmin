@@ -238,6 +238,92 @@ _wrkactjob_refresh() {
 	:
 }
 
+_wrkactjob_OK() {
+	i=1
+	err=""
+	M0="${M}"
+	while [ ${i} -le ${all_jobs_count} ]; do
+		m="$(_print_line "${i}" <<< "${M}")"
+		if [ -n "${m}" ]; then
+			e=""
+			JA_CMD_ARGS=()
+			JA_CMD_CMD=""
+			act_job="$(awk 'NR == "'${i}'" {print $1}' <<< "${all_jobs}")"
+			case "${act_job}" in
+			SBS/*)
+				if _cmd_abv_dsc "${m}" "SBS,SYS"; then
+				if grep -qswe "SBS" <<< "${JA_CMD_OBJ}"; then
+					_options_reuse "${JA_CMD_CMD}" \
+					"JA_SBSD=$(cut -f 2 -s -d '/' <<< "${act_job}")"
+				fi
+				else
+					e="Yes"
+				fi
+				;;
+			JOBQ/*)
+				if _cmd_abv_dsc "${m}" "JOBQ,SYS"; then
+				if echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
+					_options_reuse "${JA_CMD_CMD}" \
+					"JA_JOBQ=$(cut -f 2 -s -d '/' <<< "${act_job}")"
+				fi
+				else
+					e="Yes"
+				fi
+				;;
+			*)
+				if _cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS"; then
+				if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+					_options_reuse "${JA_CMD_CMD}" \
+					"JA_JOB=$(cut -f 1 -s -d '.' <<< "${act_job}")" \
+					"JA_USR=$(cut -f 2 -s -d '.' <<< "${act_job}")" \
+					"JA_PID=$(cut -f 3 -s -d '.' <<< "${act_job}")"
+				elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
+					_options_reuse "${JA_CMD_CMD}" \
+					"JA_JOBQ=$(awk -v i="${i}" \
+					'NR == i {print $7}' <<< "${all_jobs}" | \
+					cut -f 1 -d '/')"
+				elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
+					_options_reuse "${JA_CMD_CMD}" \
+					"JA_OUTQ=$(_read_option "JA_OUTQ" \
+					"$(awk -v i="${i}" \
+					'NR == i {print $NF}' <<< "${all_jobs}")")"
+				fi
+				else
+					e="Yes"
+				fi
+				;;
+			esac
+			if [ -z "${e}" ]; then
+				if [ -n "${JA_CMD_CMD}" ]; then
+					[ -z "${cmd_options}" ] || \
+						eval JA_CMD_ARGS+=(${cmd_options})
+					if [ -z "${JA_FKEY_CONFIRM}" -a \
+					"${JA_CMD_TERMINAL}" -lt 1 ]; then
+						_cmd_exec_background || e="No"
+					else
+						_cmd_exec || e="No"
+					fi
+				else
+					e="Yes"
+				fi
+			fi
+			if [ -z "${e}" ]; then
+				M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
+			else
+				[ "${e}" != "Yes" ] || \
+					_usr_notify "Invalid option '${m}'." "" "y"
+				err="Yes"
+			fi
+		fi
+		i=$((${i}+1))
+	done
+	if [ -n "${err}" ]; then
+		M="${M0}"
+	else
+		_${JA_MODULE}_refresh "y"
+	fi
+}
+
 _wrkactjob() {
 	local job f timerls
 	local sbsd sbsd_maxjobs
@@ -249,6 +335,7 @@ _wrkactjob() {
 
 	JA_DIALOG_COMMANDS="\Z1S\Zntrsbs dis\Z1P\Znlay \Z1E\Znnd \Z1H\Znold \Z1R\Znelease \Z1C\Znhgjob \Z1D\Znltjob dspjob\Z1L\Znog dspjob\Z1S\Zncr wrkspl\Z1F\Zn"
 	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F4 F5 F6 F9 F11 F12")"
+	JA_DIALOG_LABEL=""
 	_${JA_MODULE}_chgview
 	_${JA_MODULE}_refresh
 	rc=0
@@ -318,140 +405,9 @@ _wrkactjob() {
 			line=$((${line}+1))
 			unset f1 f2 f3 f4 f5 f6 f7 f8
 		done <<< "${all_jobs}"
-		line=$((${line}+1))
-		DIALOG="${DIALOG}$(_dialog_options "${cmd_options}" "Parms-Cmd")"
 		# show dialog
-		rc=0
-		M="$(_dialog_exec "${JA_CONF_DLG}")" || \
-			rc="${?}"
-		lastkey="$(tail --lines=1 <<< "${M}")"
-		case "${rc}" in
-		0) # OK
-			_wrk_options
-			if [ -n "${M}" ]; then
-				i=1
-				err=""
-				M0="${M}"
-				while [ ${i} -le ${all_jobs_count} ]; do
-					m="$(_print_line "${i}" <<< "${M}")"
-					if [ -n "${m}" ]; then
-						e=""
-						JA_CMD_ARGS=()
-						JA_CMD_CMD=""
-						act_job="$(awk 'NR == "'${i}'" {print $1}' <<< "${all_jobs}")"
-						case "${act_job}" in
-						SBS/*)
-							if _cmd_abv_dsc "${m}" "SBS,SYS"; then
-							if grep -qswe "SBS" <<< "${JA_CMD_OBJ}"; then
-								_options_reuse "${JA_CMD_CMD}" \
-								"JA_SBSD=$(cut -f 2 -s -d '/' <<< "${act_job}")"
-							fi
-							else
-								e="Yes"
-							fi
-							;;
-						JOBQ/*)
-							if _cmd_abv_dsc "${m}" "JOBQ,SYS"; then
-							if echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
-								_options_reuse "${JA_CMD_CMD}" \
-								"JA_JOBQ=$(cut -f 2 -s -d '/' <<< "${act_job}")"
-							fi
-							else
-								e="Yes"
-							fi
-							;;
-						*)
-							if _cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS"; then
-							if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
-								_options_reuse "${JA_CMD_CMD}" \
-								"JA_JOB=$(cut -f 1 -s -d '.' <<< "${act_job}")" \
-								"JA_USR=$(cut -f 2 -s -d '.' <<< "${act_job}")" \
-								"JA_PID=$(cut -f 3 -s -d '.' <<< "${act_job}")"
-							elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
-								_options_reuse "${JA_CMD_CMD}" \
-								"JA_JOBQ=$(awk -v i="${i}" \
-								'NR == i {print $7}' <<< "${all_jobs}" | \
-								cut -f 1 -d '/')"
-							elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
-								_options_reuse "${JA_CMD_CMD}" \
-								"JA_OUTQ=$(_read_option "JA_OUTQ" \
-								"$(awk -v i="${i}" \
-								'NR == i {print $NF}' <<< "${all_jobs}")")"
-							fi
-							else
-								e="Yes"
-							fi
-							;;
-						esac
-						if [ -z "${e}" ]; then
-							if [ -n "${JA_CMD_CMD}" ]; then
-								[ -z "${cmd_options}" ] || \
-									eval JA_CMD_ARGS+=(${cmd_options})
-								if [ -z "${JA_FKEY_CONFIRM}" -a \
-								"${JA_CMD_TERMINAL}" -lt 1 ]; then
-									_cmd_exec_background || e="No"
-								else
-									_cmd_exec || e="No"
-								fi
-							else
-								e="Yes"
-							fi
-						fi
-						if [ -z "${e}" ]; then
-							M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
-						else
-							[ "${e}" != "Yes" ] || \
-								_usr_notify "Invalid option '${m}'." "" "y"
-							err="Yes"
-						fi
-					fi
-					i=$((${i}+1))
-				done
-				if [ -n "${err}" ]; then
-					M="${M0}"
-				else
-					_${JA_MODULE}_refresh "y"
-				fi
-			elif [ -n "${cmd_options}" ] && \
-			eval JA_CMD_ARGS=(${cmd_options}); then
-				if _cmd_dsc "${JA_CMD_ARGS[@]}"; then
-					unset JA_CMD_ARGS[0]
-					if [ -z "${JA_FKEY_CONFIRM}" -a \
-					"${JA_CMD_TERMINAL}" -lt 1 ]; then
-						if _cmd_exec_background; then
-							_${JA_MODULE}_refresh "y"
-						fi
-					else
-						if _cmd_exec; then
-							_${JA_MODULE}_refresh "y"
-						fi
-					fi
-				else
-					_cmd_exec_shell
-					_${JA_MODULE}_refresh "y"
-				fi
-			else
-				_${JA_MODULE}_refresh "y"
-			fi
-			;;
-		2)
-			_help_cmds
-			;;
-		3)
-			_extra_button
-			;;
-		4) # NO Item-Help
-			_usr_notify "$(_usage 2>&1)" "" "y"
-			;;
-		1|255) # 1=Cancel 255=Esc or ERR
-			rc=0
+		_interactive_dialog || \
 			break
-			;;
-		*)
-			_usr_notify "error ${rc} in dialog." "" "y"
-			break
-			;;
-		esac
 	done
 	_dialog_end
 	return "${rc}"

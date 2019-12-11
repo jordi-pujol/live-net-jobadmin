@@ -1,3 +1,16 @@
+jobadmin (1.82) unstable; urgency=medium
+
+  * when using a swap file set /sys/power/resume_offset
+    before hibernating or suspending
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 10 Dec 2019 15:39:19 +0100
+
+jobadmin (1.81) unstable; urgency=medium
+
+  * field sensitive help and assistance
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 13 Oct 2019 13:35:22 +0200
+
 jobadmin (1.80) unstable; urgency=medium
 
   * in interactive subfiles display the order number of each line

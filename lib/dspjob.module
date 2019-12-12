@@ -62,7 +62,7 @@ NR == 3' "${JA_JOB_DIR}job.cmd"
 		while read splf; do
 			[ -e "${splf}" ] || continue
 			printf '%s %s\n' "$(basename "${splf}")" \
-				"$(date +'%Y-%m-%d %H:%M:%S' --date=@$(stat -c '%Y' "${splf}"))"
+				"$(_datetime --date=@$(stat -c '%Y' "${splf}"))"
 		done < <( ( set +o noglob
 			(ls -1c "${JA_JOB_DIR}"*.splfa 2> /dev/null) ) )
 		if [ -n "${JA_PID}" ]; then

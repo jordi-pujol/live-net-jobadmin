@@ -55,6 +55,10 @@ _realpath() {
 	readlink -f "${1}" || readlink "${1}" || echo "${1}"
 }
 
+_datetime() {
+	date +'%Y-%m-%d %H:%M:%S' "${@}"
+}
+
 _flock_lckfile() {
 	local lckfile
 	[ -d "/run/lock/flock/" ] || mkdir -p -m 0777 "/run/lock/flock/"
@@ -311,7 +315,7 @@ _interactive_dialog() {
 
 	if [ ${rc} -eq 2 ]; then
 		JA_DIALOG_LABEL="$(awk 'NR == 1 {if ($1 == "HELP") print $2; exit}' <<< "${M}")"
-		M="$(sed '2,$!d' <<< "${M}")"
+		M="$(_print_line '2,$' <<< "${M}")"
 	else
 		JA_DIALOG_LABEL=""
 	fi
@@ -344,13 +348,13 @@ _interactive_dialog() {
 	-n "${JA_FKEY_PARMS}" -o \
 	-n "${JA_FKEY_RETRIEVE}" -o \
 	-n "${JA_FKEY_CHGVIEW}" ]; then
-		if [ -z "${M//[[:blank:]$'\n']/}" ]; then
+		if [ -z "${M}" ]; then
 			if [ -n "${JA_FKEY_RETRIEVE}" ]; then
 				[ -n "${cmd_options}" ] || \
 					cmd_index=0
 				cmd_options="$(_cmd_retrieve)"
 				cmd_index="$((${cmd_index}+1))"
-			elif [ -n "${cmd_options//[[:blank:]$'\n']/}" ]; then
+			elif [ -n "${cmd_options}" ]; then
 				_usr_notify "Can't refresh while there are pending options." \
 					"" "y"
 				return 1
@@ -358,8 +362,8 @@ _interactive_dialog() {
 		else
 			_usr_notify "Can't modify display while there are pending options." \
 				"" "y"
+			return 1
 		fi
-		return 0
 	fi
 	if [ -n "${JA_FKEY_REFRESH}" ]; then
 		JA_DIALOG_LABEL=""
@@ -1803,8 +1807,7 @@ _printvars() {
 	while read -r var; do
 		if grep -qs -e '^JA_DATE' <<< "${var}"; then
 			printf '%s %s\n' "${var}" "$(LANGUAGE="${JA_LANGUAGE}" \
-				date --date="@$(sed -e "s|'||g" <<< "${var#*=}")" \
-				+'%Y-%m-%d %H:%M:%S')"
+				_datetime --date="@$(sed -e "s|'||g" <<< "${var#*=}")")"
 		else
 			printf '%s\n' "${var}"
 		fi

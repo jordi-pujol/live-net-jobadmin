@@ -312,7 +312,10 @@ _wrkactjob_OK() {
 			else
 				[ "${e}" != "Yes" ] || \
 					_usr_notify "Invalid option '${m}'." "" "y"
-				err="Yes"
+				if [ -z "${err}" ]; then
+					JA_DIALOG_LABEL="${i}"
+					err="Yes"
+				fi
 			fi
 		fi
 		i=$((${i}+1))
@@ -350,7 +353,7 @@ _wrkactjob() {
 			# formatted listing of job data
 			grep -qsE '^SBS|^JOBQ' <<< "${f1}" || \
 				[ "${f6}" = "-" ] || \
-				f6="$(date --date=@${f6} +'%Y-%m-%d %H:%M:%S')"
+				f6="$(_datetime --date=@${f6})"
 
 			i=$((${i}+1))
 			m="$(_print_line "${i}" <<< "${M}")"

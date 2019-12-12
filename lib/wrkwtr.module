@@ -326,7 +326,10 @@ _wrkwtr_OK() {
 			else
 				[ "${e}" != "Yes" ] || \
 					_usr_notify "Invalid option '${m}'." "" "y"
-				err="Yes"
+				if [ -z "${err}" ]; then
+					JA_DIALOG_LABEL="${i}"
+					err="Yes"
+				fi
 			fi
 		fi
 		i=$((${i}+1))
@@ -364,7 +367,7 @@ _wrkwtr() {
 			# formatted listing of job data
 			grep -qsE '^WTR|^OUTQ' <<< "${f1}" || \
 			[ "${f5}" = "-" ] || \
-				f5="$(date --date=@${f5} +'%Y-%m-%d %H:%M:%S')"
+				f5="$(_datetime --date=@${f5})"
 
 			i=$((${i}+1))
 			m="$(_print_line "${i}" <<< "${M}")"

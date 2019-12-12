@@ -117,7 +117,10 @@ _wrkusrjob_OK() {
 			else
 				[ "${e}" != "Yes" ] || \
 					_usr_notify "Invalid option '${m}'." "" "y"
-				err="Yes"
+				if [ -z "${err}" ]; then
+					JA_DIALOG_LABEL="${i}"
+					err="Yes"
+				fi
 			fi
 		fi
 		i=$((${i}+1))
@@ -173,7 +176,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 					"${job}.${usr}${job_pid:+".${job_pid}"}" \
 					"${sts}" \
 					"${pty}" \
-					"$(date --date=@${timerls} +'%Y-%m-%d %H:%M:%S')" \
+					"$(_datetime --date=@${timerls})" \
 					"${jobq}$(test "${jobq_sts}" = "-" || printf '%s' "/${jobq_sts}")")"
 				;;
 			*)
@@ -181,7 +184,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 					"${job}.${usr}${job_pid:+".${job_pid}"}" \
 					"${sts}" \
 					"${pty}" \
-					"$(date --date=@${timerls} +'%Y-%m-%d %H:%M:%S')" \
+					"$(_datetime --date=@${timerls})" \
 					"${job_pids}")"
 				;;
 			esac

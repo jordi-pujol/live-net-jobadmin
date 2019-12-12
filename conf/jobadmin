@@ -37,10 +37,10 @@ if [ -z "${JA_CGEXEC:+"${JA_CGEXEC}"}" ]; then
 
 # command to view and edit a job command script in an X screen;
 JA_XCMDEDIT=""
-if xset -q > /dev/null 2>&1; then
-	! editor="$(which geany)" || \
-		JA_XCMDEDIT="$editor --no-session --new-instance --read-only"
-fi
+#if xset -q > /dev/null 2>&1; then
+#	! editor="$(which geany)" || \
+#		JA_XCMDEDIT="$editor --no-session --new-instance --read-only"
+#fi
 
 # x-terminal-emulator
 # xfce4-terminal is preferred, you must use it if possible.

@@ -43,6 +43,7 @@ _jobadmin_parms() {
 	JA_DIALOG_FIELDS="Param_Name:20 Value:20:30 Description:20 ChoiceList:30"
 	JA_DIALOG_COMMANDS="Enter Values, press Enter:"
 	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F5 F12")"
+	JA_DIALOG_LABEL=""
 
 	M="${M0}"
 	while :; do
@@ -79,8 +80,8 @@ $(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}
 		rc=0
 		M="$(_dialog_exec "${JA_CONF_DLG_F4}")" || rc="${?}"
 		cont="y"
-		_lastkey_detect "$(tail --lines=1 <<< "${M}")"
-		M="$(head --lines=-1 <<< "${M}" | \
+		_lastkey_detect "$(_print_line "$(((line+1)/2))" <<< "${M}")"
+		M="$(_print_line "1,$(((line-1)/2))" <<< "${M}" | \
 			tr "'" '"' | \
 			sed -re '\|^[[:blank:]]+| s|||
 			\|[[:blank:]]+$| s|||')"
@@ -110,7 +111,6 @@ $(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}
 			if res="$(tr -s '@' '\n' <<< "${options_getopt}-h,--help i JA_HELP" | \
 			getopt-sh "${JA_CMD_ARGS[@]:-}")" || \
 			grep -qse "^JA_HELP=.*Yes" <<< "${res}"; then
-				rc=0
 				break
 			else
 				_usr_notify "$(_getopt_errors "${res}")" "" "y"

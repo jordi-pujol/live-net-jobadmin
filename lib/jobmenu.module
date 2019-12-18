@@ -44,11 +44,6 @@ JA_COMMAND p"
 _jobmenu_refresh() {
 	# global JA_OBJ all_cmds all_cmds_count
 
-	all_cmds="$(awk '$2 ~ "^[[:upper:],]+$" {printf $1 OFS $2 OFS
-for (i=8;i<=NF;i++) printf $i OFS
-printf ORS}' "${JA_CONF_CMDS}" | \
-		sort -k 2,2 -k 1,1)"
-
 	all_cmds="$(awk -v obj="${JA_OBJ}" \
 'BEGIN{if (obj != "ALL") {
 	split(obj, a, ",")
@@ -75,6 +70,8 @@ _jobmenu() {
 
 	# list the jobs
 	JA_DIALOG_COMMANDS="Select a command."
+	JA_DIALOG_FKEYS=""
+	JA_DIALOG_LABEL=""
 	_jobmenu_refresh
 	rc=0
 	while :; do
@@ -86,27 +83,28 @@ _jobmenu() {
 --colors \
 --begin ${JA_DIALOG_HEIGHT} 0 \
 --title Messages --tailboxbg ${JA_DIALOG_TAILBOXMSG} \
-$((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
+$((${JA_dialog_init_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_dialog_init_WIDTH} \
 --and-widget \
+--ok-label Assist \
 --help-button --help-status \
---extra-button --extra-label Parms \
 --default-item '${JA_COMMAND}' \
 --clear --title '${JA_MODULE_NAME}' \
 --colors \
---begin 0 $(((${JA_DIALOG_SCREEN_WIDTH}-51)/2)) \
+--begin 0 $(((${JA_dialog_init_WIDTH}-51)/2)) \
 --menu '${JA_DIALOG_COMMANDS}' ${JA_DIALOG_HEIGHT} \
 51 $((${JA_DIALOG_HEIGHT}-4)) \
 $(while read cmd type desc; do
 	printf "'%s' '%s' " "${cmd}" "${desc}"
 done <<< "${all_cmds}"
 )"
-		cmd="$(eval "${DIALOG}")" && \
+		cmd="$(eval "${DIALOG}" )" && \
 			rc=0 || rc="${?}"
 		case "${rc}" in
-		0) # OK
+		0|3) # OK or Extra-button
 			if [ -n "${cmd}" ]; then
+				JA_COMMAND="$(awk '{print $1}' <<< "${cmd}")"
 				export JA_FKEY_ASSIST="Yes"
-				if _cmd_dsc "${cmd}"; then
+				if _cmd_dsc "${JA_COMMAND}"; then
 					JA_CMD_ARGS=()
 					_cmd_exec || :
 				else
@@ -115,11 +113,8 @@ done <<< "${all_cmds}"
 			fi
 			;;
 		2) # Help depending on selected option
-			cmd="$(awk '{print $2}' <<< "${cmd}")"
-			_usr_notify "$(_usage "${cmd}" 2>&1)" "" "y"
-			;;
-		3) # Extra-button
-			_jobadmin_parms_vars
+			JA_COMMAND="$(awk '{print $2}' <<< "${cmd}")"
+			_usr_notify "$(_usage "${JA_COMMAND}" 2>&1)" "" "y"
 			;;
 		4) # NO Item-Help
 			_usr_notify "$(_usage 2>&1)" "" "y"

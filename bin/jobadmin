@@ -74,12 +74,13 @@ function _finish {
 		echo "Error on command '${cmd}' near line ${parent_lineno}." >&2
 	fi
 	# exit
-	trap - EXIT
+	trap - EXIT SIGWINCH
 	[ -z "${JA_MESG}" ] || \
 		chmod g+w "$(tty)" || :
 }
 # stop, signal TERM,
 trap '_finish "${LINENO}" "${BASH_COMMAND}"' EXIT
+trap ':' SIGWINCH
 
 # main procedure
 JA_USRACT="$(id -un)"

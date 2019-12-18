@@ -71,12 +71,6 @@ NR == 3' "${JA_JOB_DIR}job.cmd"
 			printf '\nCommand:\n'
 			awk 'NR == 2 && $0 != "# jobadmin script" {print "Custom script"; exit}
 NR == 3' "${JA_JOB_DIR}job-${JA_PID}.cmd"
-			printf '\n%s\n' "Spool files:"
-			while read splf; do
-				[ -e "${splf}" ] || continue
-				printf '%s\n' "$(_splf_name "${splf}")"
-			done < <(find "${JA_JOB_DIR}" -type f \
--name "job-${JA_PID}-*.splfa")
 		fi
 	) 2>&1 | pager
 } # dspjob

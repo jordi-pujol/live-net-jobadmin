@@ -344,6 +344,10 @@ _interactive_dialog() {
 		fi
 		return 0
 	fi
+	if [ -n "${JA_FKEY_HELP}" ]; then
+		_help_cmds
+		return 0
+	fi
 	if [ -n "${JA_FKEY_REFRESH}" -o \
 	-n "${JA_FKEY_PARMS}" -o \
 	-n "${JA_FKEY_RETRIEVE}" -o \
@@ -353,20 +357,22 @@ _interactive_dialog() {
 				[ -n "${cmd_options}" ] || \
 					cmd_index=0
 				cmd_options="$(_cmd_retrieve)"
-				cmd_index="$((${cmd_index}+1))"
-			elif [ -n "${cmd_options}" ]; then
+				cmd_index="$((cmd_index+1))"
+				return 0
+			fi
+			if [ -n "${cmd_options}" ]; then
 				_usr_notify "Can't refresh while there are pending options." \
 					"" "y"
-				return 1
+				return 0
 			fi
 		else
 			_usr_notify "Can't modify display while there are pending options." \
 				"" "y"
-			return 1
+			return 0
 		fi
 	fi
 	if [ -n "${JA_FKEY_REFRESH}" ]; then
-		JA_DIALOG_LABEL=""
+		_${JA_MODULE}_refresh
 		return 0
 	fi
 	if [ -n "${JA_FKEY_ENTER}" -o \
@@ -397,7 +403,7 @@ _interactive_dialog() {
 		return 0
 	fi
 	if [ -n "${JA_FKEY_CHGVIEW}" ]; then
-		JA_SEQ=$((${JA_SEQ}+1))
+		JA_SEQ=$((JA_SEQ+1))
 		_${JA_MODULE}_chgview
 		_${JA_MODULE}_refresh
 		return 0
@@ -407,14 +413,8 @@ _interactive_dialog() {
 		return 0
 	fi
 
-	case "${rc}" in
-	0)
+	[ ${rc} != 0 ] || \
 		_${JA_MODULE}_refresh
-		;;
-	2)
-		_help_cmds
-		;;
-	esac
 }
 
 _usr_notify() {
@@ -478,9 +478,9 @@ _commands_exec() {
 			/[.]$/ s//0/
 			/^[0]+/ s///' <<< "${pm}")"
 		[ -z "${pc}" ] || \
-			pcpu=$((${pcpu}+${pc}))
+			pcpu=$((pcpu+pc))
 		[ -z "${pm}" ] || \
-			pmem=$((${pmem}+${pm}))
+			pmem=$((pmem+pm))
 		unset pc pm c
 	done < <(ps --no-heading -o pcpu,pmem,comm --pid $(_ps_children "${pid}"))
 
@@ -1387,20 +1387,24 @@ _print_job_cmd() {
 }
 
 _dialog_init() {
+	local size
 	[ -n "${JA_DIALOG_TAILBOXMSG:+"${JA_DIALOG_TAILBOXMSG}"}" ] || \
 		JA_DIALOG_TAILBOXMSG="${JA_USRACT_DIR:-"${JA_USR_DIR}"}user.msgq"
-	_fd_restore
 	# variables that are already set in Bash environment, LINES and COLUMNS
 # 	export JA_DIALOG_SCREEN_HEIGHT=`tput lines`
 # 	export JA_DIALOG_SCREEN_WIDTH=`tput cols`
 # 	echo "lines,columns: ${LINES:-} ${COLUMNS:-}" >&2
-	export JA_DIALOG_SCREEN_WIDTH="${COLUMNS:-"$(dialog --print-maxsize --stdout | \
-		awk '{print $3}')"}"
-	export JA_DIALOG_SCREEN_HEIGHT="${LINES:-"$(dialog --print-maxsize --stdout | \
-		awk '{print $2}' | tr -d ',')"}"
-	export JA_DIALOG_WIDTH=$((${JA_DIALOG_SCREEN_WIDTH}))
-	export JA_DIALOG_HEIGHT=$((${JA_DIALOG_SCREEN_HEIGHT}-14))
+	_fd_restore
+	size="$(dialog --print-maxsize --stdout)"
 	_fd_save
+	export JA_DIALOG_SCREEN_WIDTH="$(awk '{print $3+0}' <<< "${size}" )"
+	test ${JA_DIALOG_SCREEN_WIDTH} -ge 80 || \
+		JA_DIALOG_SCREEN_WIDTH=80
+	export JA_DIALOG_SCREEN_HEIGHT="$(awk '{print $2+0}' <<< "${size}" )"
+	test ${JA_DIALOG_SCREEN_HEIGHT} -ge 25 || \
+		JA_DIALOG_SCREEN_HEIGHT=25
+	export JA_DIALOG_WIDTH=$((JA_DIALOG_SCREEN_WIDTH))
+	export JA_DIALOG_HEIGHT=$((JA_DIALOG_SCREEN_HEIGHT-14))
 }
 
 _dialog_end() {
@@ -1410,7 +1414,7 @@ _dialog_end() {
 
 _dialog_header_form() {
 	local r s column w field_width label_width
-	w=$((${JA_DIALOG_WIDTH}-3))
+	w=$((JA_DIALOG_WIDTH-3))
 	r=" "
 	column=1
 	for s in ${JA_DIALOG_FIELDS}; do
@@ -1420,7 +1424,7 @@ _dialog_header_form() {
 			label_width=0
 		[ ${label_width} -eq 0 ] && \
 			label_width=${field_width//[.]/} || \
-			label_width=$((${label_width}+${field_width//[.]/}))
+			label_width=$((label_width+${field_width//[.]/}))
 		if grep -qs -e '\.$' <<< "${field_width}"; then
 			r="${r}$(printf "%${label_width}.${label_width}s" \
 				"$(cut -f 1 -s -d ':' <<< "${s}")" | tr ' ' '_')"
@@ -1428,7 +1432,7 @@ _dialog_header_form() {
 			r="${r}$(printf "%.${label_width}s" \
 			"$(cut -f 1 -s -d ':' <<< "${s}")" | tr ' ' '_')"
 		fi
-		column=$((${column}+${label_width}+1))
+		column=$((column+label_width+1))
 		[ ${column} -le ${w} ] || column=${w}
 		while [ $(sed -e 's|\\Z.||g' <<< "${r}" | wc --chars) -lt ${column} ]; do
 			r="${r}_"
@@ -1442,9 +1446,9 @@ _dialog_header() {
 # --trace "${JA_DIALOG_TRACE}"
 	printf '%s\n' "dialog --output-fd 7 --stdout --no-shadow --separator '#' \
 --colors \
---begin $((${JA_DIALOG_HEIGHT})) 0 \
+--begin $((JA_DIALOG_HEIGHT)) 0 \
 --title Messages --tailboxbg ${JA_DIALOG_TAILBOXMSG} \
-$((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
+$((JA_DIALOG_SCREEN_HEIGHT-JA_DIALOG_HEIGHT)) ${JA_DIALOG_SCREEN_WIDTH} \
 --and-widget \
 --begin 0 0 \
 --title ${1//[[:blank:]]/_} \
@@ -1452,8 +1456,8 @@ $((${JA_DIALOG_SCREEN_HEIGHT}-${JA_DIALOG_HEIGHT})) ${JA_DIALOG_SCREEN_WIDTH} \
 --extra-button --extra-label Rfrsh${autorefresh:+":AUTO"} \
 --last-key \
 --colors \
-${JA_DIALOG_LABEL:+--default-item '${JA_DIALOG_LABEL}'} \
---form '$(_dialog_header_form)' ${JA_DIALOG_HEIGHT} ${JA_DIALOG_WIDTH} $((${JA_DIALOG_HEIGHT}-8)) "
+--default-item '${JA_DIALOG_LABEL}' \
+--form '$(_dialog_header_form)' ${JA_DIALOG_HEIGHT} ${JA_DIALOG_WIDTH} $((JA_DIALOG_HEIGHT-8)) "
 }
 
 _dialog_line() {
@@ -1508,11 +1512,11 @@ _dialog_line() {
 			field="$(printf "%.${field_width}s" "${field}")"
 		fi
 		printf '%s ' "'${label}'" "${line}" "${column}" "'${field}'" \
-			"${line}" "$((${column}+${label_width}))" \
+			"${line}" "$((column+label_width))" \
 			"$(test ${field_input} -eq 0 && echo 0 || echo ${field_width})" \
 			"${field_input}"
 		printf '\n'
-		column=$((${column}+${label_width}+${field_width}+1))
+		column=$((column+label_width+field_width+1))
 		shift
 	done
 }
@@ -1521,7 +1525,7 @@ _dialog_options() {
 	local value="${1}" prompt="${2}"
 	local w o
 
-	w=$((${JA_DIALOG_WIDTH}-15))
+	w=$((JA_DIALOG_WIDTH-15))
 	if [ ${w} -gt 80 ]; then
 		o=${w}
 	else
@@ -1541,7 +1545,7 @@ _dialog_fkeys() {
 }
 
 _dialog_exec() {
-	local dialogrc="${1}"
+	local dialogrc="${1:-}"
 	local M rc
 	rc=0
 	M="$(eval "DIALOGRC=${dialogrc} $(tr -s '#' '\n' <<< "${DIALOG//[$'\n']/ }")")" || \
@@ -1778,10 +1782,10 @@ _cmd_retrieve() {
 		sed -nre '\|^[[:blank:]]*[[:digit:]]+[[:blank:]]+([^[:blank:]]+.*)$|{s||\1|p;q0};q1'; then
 			return 0
 		fi
-		c=$((${c}+1))
+		c=$((c+1))
 		[ ${c} -lt 3 ] || \
 			return 0
-		cmd_index=$((${cmd_index}+1))
+		cmd_index=$((cmd_index+1))
 	done
 	:
 }

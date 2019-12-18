@@ -216,7 +216,7 @@ _wrkactjob_refresh() {
 	local list_jobs
 	local jobqs sbsds
 
-	M=""; cmd_options=""
+	M=""; cmd_options=""; JA_DIALOG_LABEL=""
 	if [ -n "${auto}" ]; then
 		[ -n "${autorefresh}" ] || \
 			return 0
@@ -339,6 +339,7 @@ _wrkactjob() {
 	JA_DIALOG_COMMANDS="\Z1S\Zntrsbs dis\Z1P\Znlay \Z1E\Znnd \Z1H\Znold \Z1R\Znelease \Z1C\Znhgjob \Z1D\Znltjob dspjob\Z1L\Znog dspjob\Z1S\Zncr wrkspl\Z1F\Zn"
 	JA_DIALOG_FKEYS="$(_dialog_fkeys "F1 F2 F4 F5 F6 F9 F11 F12")"
 	JA_DIALOG_LABEL=""
+
 	_${JA_MODULE}_chgview
 	_${JA_MODULE}_refresh
 	rc=0

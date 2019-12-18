@@ -36,39 +36,10 @@ dltjob -j|--job 'JOBNAME'
 delete a job and their related executions data"
 
 _dltjob_options="JA_JOB pr@
-JA_USR pr@
-JA_PIDL pr@
-JA_KEEP pr@"
-
-_dltjob_by_pid() {
-	# global rc attrs job_pids
-	local job_pid="${1}"
-	local f found ja_pids
-
-	found=""
-	while read f; do
-		[ -e "${f}" ] || \
-			continue
-		rm -f "${f}"
-		found="y"
-	done < <(find "${JA_JOB_DIR}" -maxdepth 1 -type f \
-	-name "job-${job_pid}[^[:digit:]]*")
-	if [ -n "${found}" ]; then
-		_usr_notify "Removing job execution '${JA_JOB}.${JA_USR}.${job_pid}'."
-		if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]+[[:blank:]]*| \
-		{s|||p;q0};q1" <<< "${job_pids}")"; then
-			job_pids="${ja_pids}"
-			_set_option "${attrs}" "JA_PIDS" "${ja_pids}"
-		fi
-	else
-		rc=1
-		_usr_notify "Error: job execution '${JA_JOB}.${JA_USR}.${job_pid}' doesn't exist."
-	fi
-}
+JA_USR pr@"
 
 _dltjob() {
-	local fd1 job_pid
-	local rc attrs job_pids # global
+	local fd1
 
 	if ! _test_rw "${JA_JOB_DIR}"; then
 		_usr_notify "Error: Not authorized to delete job '${JA_JOB}.${JA_USR}'."
@@ -79,40 +50,12 @@ _dltjob() {
 		_usr_notify "Error: job '${JA_JOB}.${JA_USR}' is locked."
 		return 1
 	fi
-	rc=0
-	if [ "${JA_PIDL}" = "all" ]; then
-		if [ "${JA_KEEP}" -eq 0 ]; then
-			rm -rf "${JA_JOB_DIR}"
-			[ ! -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" ] || \
-				printf '%s\n' "g/^${JA_JOB}$/d" 'w' | \
-				ed -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" || :
-			_usr_notify "Removing job '${JA_JOB}.${JA_USR}'."
-		else
-			( set +o noglob 
-			while read -r job_cmd; do
-				rm -f "${job_cmd%".cmd"}"[.-]*
-			done < <( ls -1c "${JA_JOB_DIR}job-"*.cmd | \
-			head -q --lines=-${JA_KEEP} ) )
 
-			attrs="${JA_JOB_DIR}job.attrs"
-			_set_option "${attrs}" "JA_PIDS" \
-				"$(_read_option "JA_PIDS" "${attrs}" | \
-				awk -v ja_keep=${JA_KEEP} \
-				'{for (i=ja_keep+1; i<=NF; i++) $i=""
-				gsub(/^[[:blank:]]+|[[:blank:]]+$/, "")
-				print}')"
-		fi
-	else
-		attrs="${JA_JOB_DIR}job.attrs"
-		if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
-			for job_pid in $(tr -s ',' ' ' <<< "${JA_PIDL}"); do
-				_dltjob_by_pid "${job_pid}"
-			done
-		else
-			_usr_notify "Warning: no executions exist for '${JA_JOB}.${JA_USR}'."
-		fi
-	fi
+	rm -rf "${JA_JOB_DIR}"
+	[ ! -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" ] || \
+		printf '%s\n' "g/^${JA_JOB}$/d" 'w' | \
+		ed -s "${JA_USR_DIR}${JA_USR_SCDJOBS}" || :
+	_usr_notify "Removing job '${JA_JOB}.${JA_USR}'."
 
-	return $rc
 	) {fd1}< "$(_flock_lckfile "${JA_JOB_DIR}")"
 } # dltjob

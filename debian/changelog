@@ -2,6 +2,7 @@ jobadmin (1.82) unstable; urgency=medium
 
   * when using a swap file set /sys/power/resume_offset
     before hibernating or suspending
+  * new command to remove job executions. clrjob
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 10 Dec 2019 15:39:19 +0100
 

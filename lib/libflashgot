@@ -58,7 +58,7 @@ _jafg_aria2c_flv() {
 
 	i=0
 	for range in ${ranges}; do
-		i=$(($i+1))
+		i=$((i+1))
 		start="$(echo "${range}" | cut -f1 -s -d '-')"
 		end="$(echo "${range}" | cut -f2 -s -d '-')"
 		flv1="${flv}_${i}.flv"
@@ -81,13 +81,13 @@ _jafg_aria2c_flv() {
 			--out="${flv1}" \
 			"${url1}" &
 		pid="${!}"
-		len=$((${end}-${start}))
-		c=$((${len}/100000))
+		len=$((end-start))
+		c=$((len/100000))
 		[ ${c} -ge 10 ] || c=10
 		while kill -0 "${pid}" && \
 		[ ${c} -gt 0 ] && \
 		[ $(stat -c %s "${flv1}" 2> /dev/null || echo 0) -lt $len ]; do
-			c=$(($c-1))
+			c=$((c-1))
 			sleep 1
 		done
 
@@ -139,7 +139,7 @@ _jafg_curl_part() {
 
 	rs=0
 	i=0
-	len0=$(( ${len} - 1 ))
+	len0=$((len-1))
 
 	ranges=""
 	str="$(cut -f 1 -s -d '-' <<< "${CURL_PART_PERCENT}")"
@@ -160,7 +160,7 @@ _jafg_curl_part() {
 
 	i=0
 	for range in ${ranges}; do
-		i=$(($i+1))
+		i=$((i+1))
 		fname="${FNAME}.part$i"
 		fheader="${FNAME}.header$i"
 
@@ -188,31 +188,31 @@ _jafg_multipart() {
 	[ -n "${len}" ] || \
 		exit 1
 
-	part=$(( ( ${len} + 10 ) / ${split} ))
+	part=$(((len+10)/split))
 	pids=""
 	fnames=()
 	rs=0
 	i=0
-	len0=$(( ${len} - 1 ))
+	len0=$((len-1))
 	while :; do
 		[ ${rs} -le ${len0} ] || \
 			break
-		i=$(( $i + 1 ))
+		i=$((i+1))
 		idx="$(printf '%03d\n' $i)"
 		str=${rs}
-		end=$(( ${rs}+${part}-1 ))
+		end=$((rs+part-1))
 		[ ${end} -le ${len0} ] || \
 			end=${len0}
 		range="${str}-${end}"
-		rs=$(( ${end} + 1 ))
-		partsize=$(( ${rs} - ${str} ))
+		rs=$((end+1))
+		partsize=$((rs-str))
 
 		c=10
 		fname="${FNAME}.part${idx}"
 		fheader="${FNAME}.header${idx}"
 		fnames+=( "${fname}" )
 		while [ ${c} -gt 0 ]; do
-			c=$(($c-1))
+			c=$((c-1))
 			# TODO: check current length of the file, if present
 			# and compute the new variables range and str
 			# because options to continue are not valid

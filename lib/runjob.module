@@ -76,7 +76,7 @@ _runjob_cmd() {
 	fi
 
 		if ! _set_option "${attrs}" "JA_JOB_STS" "" || \
-		! _set_option "${attrs}" "JA_DATERLS" "$(date +%s)"; then
+		! _set_option "${attrs}" "JA_DATERLS" "$(_UTCseconds)"; then
 			_usr_notify "Error: Not authorized to run job '${JA_JOB}.${JA_USR}'."
 			return 1
 		fi

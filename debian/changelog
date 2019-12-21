@@ -1,3 +1,11 @@
+jobadmin (1.83) unstable; urgency=medium
+
+  * refresh button equivalence to F5
+  * set cursor position when can't refresh because there are pending
+    options.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 19 Dec 2019 15:16:44 +0100
+
 jobadmin (1.82) unstable; urgency=medium
 
   * when using a swap file set /sys/power/resume_offset

@@ -123,7 +123,7 @@ _wrkusrjob_OK() {
 				fi
 			fi
 		fi
-		i=$((${i}+1))
+		i=$((i+1))
 	done
 	if [ -n "${err}" ]; then
 		M="${M0}"
@@ -169,7 +169,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 				sts="ERR"
 			fi
 			# formatted listing of job data
-			i=$((${i}+1))
+			i=$((i+1))
 			m="$(sed -ne "${i}p" <<< "${M}")"
 			case "${JA_SEQ}" in
 			2)
@@ -190,7 +190,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 					"${job_pids}")"
 				;;
 			esac
-			line=$((${line}+1))
+			line=$((line+1))
 			unset timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
 		done <<< "${all_jobs}"
 		_interactive_dialog || \

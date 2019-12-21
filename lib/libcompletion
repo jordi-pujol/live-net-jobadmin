@@ -145,7 +145,7 @@ _jobadmin_pos_arg() {
 	while [ ${pos} -lt ${mpos} ] && \
 	read w && \
 	[[ ! ${w} =~ ^-.* ]]; do
-		pos=$((${pos}+1))
+		pos=$((pos+1))
 	done < <(printf '%s\n' "${words[@]}" | \
 		tail --lines=+2)
 	echo ${pos}

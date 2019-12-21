@@ -318,7 +318,7 @@ _wrkactjob_OK() {
 				fi
 			fi
 		fi
-		i=$((${i}+1))
+		i=$((i+1))
 	done
 	if [ -n "${err}" ]; then
 		M="${M0}"
@@ -356,7 +356,7 @@ _wrkactjob() {
 				[ "${f6}" = "-" ] || \
 				f6="$(_datetime --date=@${f6})"
 
-			i=$((${i}+1))
+			i=$((i+1))
 			m="$(_print_line "${i}" <<< "${M}")"
 			case "${JA_SEQ}" in
 			3)
@@ -406,7 +406,7 @@ _wrkactjob() {
 					"${f6}")"
 				;;
 			esac
-			line=$((${line}+1))
+			line=$((line+1))
 			unset f1 f2 f3 f4 f5 f6 f7 f8
 		done <<< "${all_jobs}"
 		# show dialog

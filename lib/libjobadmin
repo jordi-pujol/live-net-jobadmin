@@ -55,6 +55,10 @@ _realpath() {
 	readlink -f "${1}" || readlink "${1}" || echo "${1}"
 }
 
+_UTCseconds() {
+	date --utc +%s
+}
+
 _datetime() {
 	date +'%Y-%m-%d %H:%M:%S' "${@}"
 }
@@ -307,21 +311,27 @@ _interactive_dialog() {
 		rc="${?}"
 
 	case "${rc}" in
+	0) # Enter
+		lastkey="$(_print_line ${line} <<< "${M}")"
+		;;
 	1|255) # 1=Cancel 255=Esc or ERR, does not contain keycode
 		rc=0
 		return 1
 		;;
-	esac
-
-	if [ ${rc} -eq 2 ]; then
+	2) # Help
 		JA_DIALOG_LABEL="$(awk 'NR == 1 {if ($1 == "HELP") print $2; exit}' <<< "${M}")"
 		M="$(_print_line '2,$' <<< "${M}")"
-	else
+		lastkey="$(_print_line ${line} <<< "${M}")"
+		;;
+	3) # Extra button
+		lastkey=269 # F5
+		;;
+	*)
+		lastkey=""
 		JA_DIALOG_LABEL=""
-	fi
+		;;
+	esac
 
-	lastkey="$(_print_line ${line} <<< "${M}")"
-	M="$(_print_line "1,$((line-1))" <<< "${M}")"
 	_lastkey_detect "${lastkey}"
 
 	if [ -n "${JA_FKEY_END}" -o \
@@ -330,8 +340,7 @@ _interactive_dialog() {
 	fi
 
 	cmd_options="$(_print_line "$((line-1))" <<< "${M}")"
-	M="$(_print_line "1,$((line-2))" <<< "${M}" | \
-		tr '[:upper:]' '[:lower:]')"
+	M="$(_print_line "1,$((line-2))" <<< "${M,,}")"
 
 	if [ -n "${JA_FKEY_AUTOREFRESH}" ]; then
 		autorefresh="$(test -n "${autorefresh}" || echo "y")"
@@ -363,11 +372,13 @@ _interactive_dialog() {
 			if [ -n "${cmd_options}" ]; then
 				_usr_notify "Can't refresh while there are pending options." \
 					"" "y"
+				JA_DIALOG_LABEL="Parms-Cmd:"
 				return 0
 			fi
 		else
 			_usr_notify "Can't modify display while there are pending options." \
 				"" "y"
+			JA_DIALOG_LABEL="$(awk '$0 {print NR; exit}' <<< "${M}")"
 			return 0
 		fi
 	fi
@@ -420,8 +431,7 @@ _interactive_dialog() {
 _usr_notify() {
 	local usrs usr msg msgq usr_dir daemon
 
-	msg="[$(date --rfc-3339=seconds | \
-	cut -f 1 -d '+')${JA_CMD_PID:+" ${JA_CMD_PID}"}] $(tr -s '@' '\n' <<< "${1}")"
+	msg="[$(_datetime)${JA_CMD_PID:+" ${JA_CMD_PID}"}] ${1//@/$'\n'}"
 	usrs="${2:-"${JA_USR:-} ${JA_USRACT:-}"}"
 	[ -n "${usrs}" ] || \
 		return 0
@@ -1179,9 +1189,9 @@ $(test -z "${JA_JOB_STS}" || \
 printf '%s\n' "JA_JOB_STS='${JA_JOB_STS}'")
 $(test -z "${JA_USRACT_SUDO}" || \
 printf '%s\n' "JA_SUDO_USR='${JA_USRACT_SUDO}'")
-JA_DATESBM='$(date +%s)'
+JA_DATESBM='$(_UTCseconds)'
 $(test -n "${JA_JOB_STS}" || \
-printf '%s\n' "JA_DATERLS='$(date +%s)'")
+printf '%s\n' "JA_DATERLS='$(_UTCseconds)'")
 JA_JOB_LANGUAGE='${JA_LANGUAGE}'
 JA_PTY='${JA_PTY:-"3"}'
 $(test -z "${JA_ONERROR}" || \

@@ -60,7 +60,7 @@ _jobadmin_parms() {
 			elif awk -v o="${optiontype}" 'BEGIN{exit o ~ "[ch]"}'; then
 				choicelist=""
 			fi
-			i=$((${i}+1))
+			i=$((i+1))
 
 			m="$(_print_line "${i}" <<< "${M}")\
 $(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}")"
@@ -73,7 +73,7 @@ $(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}
 					print a }' "${JA_CONF_PARMS}" )"
 			DIALOG="${DIALOG}$(_dialog_line "${optname}" "${m}" \
 				"${option}" "${choicelist}")"
-			line=$((${line}+2))
+			line=$((line+2))
 			unset option optiontype varname choicelist defaultvalue
 		done < <(tr -s "@" '\n' <<< "${options_getopt}")
 		# show dialog
@@ -93,7 +93,7 @@ $(awk -v var="${varname}" '$1 == var {print "#"$4"#"$5; exit}' "${JA_CONF_PARMS}
 			while read option optiontype varname choicelist defaultvalue; do
 				[ -n "${varname}" ] || \
 					continue
-				i=$((${i}+1))
+				i=$((i+1))
 				m="$(_print_line "${i}" <<< "${M}")"
 				if [ -n "${m}" ]; then
 					if echo "${optiontype}" | grep -qse "m"; then

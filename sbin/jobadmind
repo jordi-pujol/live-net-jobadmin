@@ -62,7 +62,7 @@ ${0} -d"
 # log
 _log() {
 	local msg="${@}"
-	printf '%s %s\n' "$(date --rfc-3339=seconds | cut -f 1 -d '+')" \
+	printf '%s %s\n' "$(_datetime)" \
 		"${msg}" >> "${JA_LOG}"
 }
 
@@ -153,7 +153,7 @@ _enable_daemon_debug() {
 }
 
 _text_date() {
-	echo "[$(date --rfc-3339=seconds | cut -f 1 -d '+')]"
+	echo "[$(_datetime)]"
 }
 
 _jobadmin_notify_send() {
@@ -491,7 +491,7 @@ _jobadmin_job_end() {
 	job="${1}"
 	usr="${2}"
 	job_pid="${3}"
-	d="${4:-"$(date +%s)"}"
+	d="${4:-"$(_UTCseconds)"}"
 	cause="${5:-""}"
 
 	usr_dir="$(_usr_dir "${usr}")" || \
@@ -573,7 +573,7 @@ _jobadmin_job_end() {
 	if [ "${rc}" = "0" -a "${sbs_typ}" = "1" ] || \
 	[ "${rc}" != "0" -a -n "${autostr}" ]; then
 		_usr_scdjobs_add "${usr_dir}" "${job}"
-		_set_option "${attrs}" "JA_DATERLS" "$(date +%s)"
+		_set_option "${attrs}" "JA_DATERLS" "$(_UTCseconds)"
 		_set_option "${attrs}" "JA_JOB_STS" ""
 		_set_option "${attrs_exec}" "JA_JOB_STS" ""
 	else
@@ -618,7 +618,7 @@ _jobadmin_exec() {
 
 	# enable debug
 	bash_xtracefd=2
-	timestart="$(date +%s)"
+	timestart="$(_UTCseconds)"
 	attrs="${JA_JOB_DIR}job.attrs"
 	JA_DEBUG="${JA_DEBUG_EXEC:-"$(_read_option "JA_DBG" "${attrs}" || :)"}"
 	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
@@ -744,13 +744,13 @@ _jobadmin_exec() {
 				cause="ERR"
 			fi
 
-			timestart="$(($(date +%s)-${timestart}))"
+			timestart="$(($(_UTCseconds)-${timestart}))"
 			printf '%s seconds = %s.\n' "${timestart}" \
 				"$(date --date=@$((${timestart}-3600)) "+%kh%Mm%Ss")" >&2
 			_set_option "${attrs}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_CAUSE" "${cause}"
-			_set_option "${attrs_exec}" "JA_DATEEND" "$(date +%s)"
+			_set_option "${attrs_exec}" "JA_DATEEND" "$(_UTCseconds)"
 			_set_option "${attrs_exec}" "JA_RC" "${rc}"
 
 			if [ ${rc} -gt 0 ] && \
@@ -1172,7 +1172,7 @@ _jobadmin_splf_end() {
 			"JA_SPLF" "${splf_attrs}" || :)"
 		rm -f "${dataf}" "${splf_attrs}"
 	else
-		_set_option "${splf_attrs}" "JA_DATEEND" "$(date +%s)"
+		_set_option "${splf_attrs}" "JA_DATEEND" "$(_UTCseconds)"
 		_set_option "${splf_attrs}" "JA_SPLF_STS" "SAV"
 	fi
 	job="$(basename "$(dirname "${splf_attrs}")" ".job")"
@@ -1491,7 +1491,7 @@ _jobadmin_jobs_check() {
 		[ ${sbsd_maxjobs} -gt 0 ] || sbsd_maxjobs=999
 		sbsd_actjobs="$(awk -v sbsd="${sbsd}" '$3 == sbsd {c++}
 			END{print c+0}' "${JA_TMP}jobs_active.lst")"
-		sbsd_maxjobs=$(( ${sbsd_maxjobs} - ${sbsd_actjobs} ))
+		sbsd_maxjobs=$((sbsd_maxjobs-sbsd_actjobs))
 		if [ ${sbsd_maxjobs} -gt 0 ]; then
 			truncate -s 0 "${JA_TMP}jobs_sbsd.lst"
 			unset jobq jobq_sbsd jobq_maxjobs jobq_perms jobq_onerror
@@ -1505,7 +1505,7 @@ _jobadmin_jobs_check() {
 					jobq_maxjobs=999
 				jobq_actjobs="$(awk -v jobq="${jobq}" '$4 == jobq {c++}
 					END{print c+0}' "${JA_TMP}jobs_active.lst")"
-				jobq_maxjobs=$(( ${jobq_maxjobs} - ${jobq_actjobs} ))
+				jobq_maxjobs=$((jobq_maxjobs-jobq_actjobs))
 				if [ ${jobq_maxjobs} -gt 0 ]; then
 					awk -v jobq="${jobq}" '$6 == jobq {print; exit}' "${JA_TMP}jobs.lst" | \
 						sort -k 1nr,1 -k 2n,2 | \
@@ -1557,7 +1557,7 @@ _jobadmin_jobs_check() {
 						# TODO detect the kernel limit for tty numbers
 						term="${JA_VT_INTER}"
 						while echo "${terms}" | grep -qswe "tty${term}"; do
-							term=$((${term}+1))
+							term=$((term+1))
 						done
 						_log "Allocating terminal /dev/tty${term} for user ${usr}."
 						_set_option "${attrs}" "JA_JOB_TTY" "tty${term}"
@@ -1692,7 +1692,7 @@ _jobadmin_wtrs_check() {
 				"${splf_attrs}"); do
 					_jobadmin_msg_usr "${usr}" "${message}" &
 				done
-				_set_option "${splf_attrs}" "JA_DATESTR" "$(date +%s)"
+				_set_option "${splf_attrs}" "JA_DATESTR" "$(_UTCseconds)"
 				_set_option "${splf_attrs}" "JA_REQUEST" "${request}"
 				_set_option "${splf_attrs}" "JA_SPLF_STS" "WTR"
 				_set_option "${splf_attrs}" "JA_WTR" "${wtr}"
@@ -1725,7 +1725,7 @@ _jobadmin_wtrs_check() {
 	done < <(sort -k 1,1 -k 7,7 -k 3nr,3 -k 4n,4 "${JA_TMP}splfs_rdy.lst")
 	rm -f "${JA_TMP}splfs_rdy.lst"
 
-	sys_active_jobs=$((${sys_active_jobs} + \
+	sys_active_jobs=$((sys_active_jobs + \
 		$(awk '$1 !~ /stopped|hold/ {s++}
 		END{print s+0}' "${JA_TMP}splfs_wtr.lst")))
 	:
@@ -1793,7 +1793,7 @@ _jobadmin_monitor() {
 				if grep -qsxe 'Enabled=true' "${home}/.kde/share/config/kscreensaverrc"; then
 					DISPLAY="${terminal}"
 					if [ "$(_sudo "${usr}" ${JA_CMD_XSAVER})" = "false" ]; then
-						sys_active_jobs=$((${sys_active_jobs} + 1))
+						sys_active_jobs=$((sys_active_jobs+1))
 						_log "pwrdwnsys: user '${usr}' is active in" \
 							"display '${terminal}' ."
 					fi

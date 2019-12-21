@@ -332,7 +332,7 @@ _wrkwtr_OK() {
 				fi
 			fi
 		fi
-		i=$((${i}+1))
+		i=$((i+1))
 	done
 	if [ -n "${err}" ]; then
 		M="${M0}"
@@ -371,7 +371,7 @@ _wrkwtr() {
 			[ "${f5}" = "-" ] || \
 				f5="$(_datetime --date=@${f5})"
 
-			i=$((${i}+1))
+			i=$((i+1))
 			m="$(_print_line "${i}" <<< "${M}")"
 			case "${JA_SEQ}" in
 			2)
@@ -392,7 +392,7 @@ _wrkwtr() {
 					"${f5}")"
 				;;
 			esac
-			line=$((${line}+1))
+			line=$((line+1))
 			unset f1 f2 f3 f4 f5 f6 f7 f8
 		done <<< "${all_splfs}"
 		_interactive_dialog || \

@@ -59,7 +59,7 @@ _rlssplf() {
 	fi
 
 	if _set_option "${JA_SPLF_ATTRS}" "JA_SPLF_STS" "" && \
-	_set_option "${JA_SPLF_ATTRS}" "JA_DATERLS" "$(date +%s)" && \
+	_set_option "${JA_SPLF_ATTRS}" "JA_DATERLS" "$(_UTCseconds)" && \
 	_set_option "${JA_SPLF_ATTRS}" "JA_HLD" "" && \
 	_pipe_write "_jobadmin"; then
 		grep -qsxe "${JA_SPLF}" "${JA_USR_DIR}${JA_USR_SCDSPLFS}" || \

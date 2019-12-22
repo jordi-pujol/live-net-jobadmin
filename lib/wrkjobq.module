@@ -55,7 +55,7 @@ _wrkjobq_chgview() {
 
 _wrkjobq_refresh() {
 	local auto="${1:-}"
-	# global all_jobs all_jobs_count M cmd_options
+	# global subfile sfl_rec_count M cmd_options
 
 	M=""; cmd_options=""; JA_DIALOG_LABEL=""
 	if [ -n "${auto}" ]; then
@@ -63,75 +63,31 @@ _wrkjobq_refresh() {
 			return 0
 		sleep 1
 	fi
-	all_jobs="$(_find_jobs "" "" "${JA_JOB_STSL}" "${JA_JOBQ}" "" | \
+	subfile="$(_find_jobs "" "" "${JA_JOB_STSL}" "${JA_JOBQ}" "" | \
 		sort -t $'\t' -k 5n,5 -k 9nr,9 -k 1n,1)"
-	all_jobs_count="$(wc -l <<< "${all_jobs}")"
+	sfl_rec_count="$(wc -l <<< "${subfile}")"
 }
 
-_wrkjobq_OK() {
-	i=1
-	err=""
-	M0="${M}"
-	while [ ${i} -le ${all_jobs_count} ]; do
-		m="$(_print_line "${i}" <<< "${M}")"
-		if [ -n "${m}" ]; then
-			e=""
-			JA_CMD_ARGS=()
-			JA_CMD_CMD=""
-			act_job="$(_print_line "${i}" <<< "${all_jobs}")"
-			if _cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS"; then
-				if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
-					_options_reuse "${JA_CMD_CMD}" \
-					"JA_JOB=$(awk '{print $2}' <<< "${act_job}")" \
-					"JA_USR=$(awk '{print $3}' <<< "${act_job}")"
-				elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
-					_options_reuse "${JA_CMD_CMD}" \
-					"JA_JOBQ=$(awk '{print $7}' <<< "${act_job}" | cut -f 1 -d '/')"
-				elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
-					_options_reuse "${JA_CMD_CMD}" \
-					"JA_OUTQ=$(_read_option "JA_OUTQ" \
-					"$(awk '{print $NF}' <<< "${act_job}")")"
-				fi
-			else
-				e="Yes"
-			fi
-			if [ -z "${e}" ]; then
-				if [ -n "${JA_CMD_CMD}" ]; then
-					[ -z "${cmd_options}" ] || \
-						eval JA_CMD_ARGS+=(${cmd_options})
-					if [ -z "${JA_FKEY_CONFIRM}" -a \
-					"${JA_CMD_TERMINAL}" -lt 1 ]; then
-						_cmd_exec_background || e="No"
-					else
-						_cmd_exec || e="No"
-					fi
-				else
-					e="Yes"
-				fi
-			fi
-			if [ -z "${e}" ]; then
-				M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
-			else
-				[ "${e}" != "Yes" ] || \
-					_usr_notify "Invalid option '${m}'." "" "y"
-				if [ -z "${err}" ]; then
-					JA_DIALOG_LABEL="${i}"
-					err="Yes"
-				fi
-			fi
-		fi
-		i=$((i+1))
-	done
-	if [ -n "${err}" ]; then
-		M="${M0}"
-	else
-		_${JA_MODULE}_refresh "y"
+_wrkjobq_lineOK() {
+	_cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS" || \
+		return 1
+	if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+		_options_reuse "${JA_CMD_CMD}" \
+		"JA_JOB=$(awk '{print $2}' <<< "${sfl_line}")" \
+		"JA_USR=$(awk '{print $3}' <<< "${sfl_line}")"
+	elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
+		_options_reuse "${JA_CMD_CMD}" \
+		"JA_JOBQ=$(awk '{print $7}' <<< "${sfl_line}" | cut -f 1 -d '/')"
+	elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
+		_options_reuse "${JA_CMD_CMD}" \
+		"JA_OUTQ=$(_read_option "JA_OUTQ" \
+		"$(awk '{print $NF}' <<< "${sfl_line}")")"
 	fi
 }
 
 _wrkjobq() {
 	local a line DIALOG job_pid job_pids
-	local lastkey M cmd_options all_jobs rc job_dir
+	local lastkey M cmd_options subfile rc job_dir
 	local timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
 	local autorefresh="${JA_AUTOREFRESH:-}"
 
@@ -151,7 +107,8 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 		i=0
 		unset timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
 		while IFS=$'\t' read timerls job usr sts stsord sbsd jobq \
-		jobq_sts pty attrs rest; do
+		jobq_sts pty attrs rest && \
+		let ++i; do
 			[ -n "${timerls}" ] || continue
 			job_pids=""
 			job_pid=""
@@ -166,7 +123,6 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 				sts="ERR"
 			fi
 			# formatted listing of job data
-			i=$((i+1))
 			m="$(sed -ne "${i}p" <<< "${M}")"
 			case "${JA_SEQ}" in
 			2)
@@ -187,9 +143,9 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 					"${job_pids}")"
 				;;
 			esac
-			line=$((line+1))
+			let ++line
 			unset timerls job usr sts stsord sbsd jobq jobq_sts pty attrs
-		done <<< "${all_jobs}"
+		done <<< "${subfile}"
 		_interactive_dialog || \
 			break
 	done

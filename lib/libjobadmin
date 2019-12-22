@@ -304,7 +304,7 @@ _help_cmds() {
 }
 
 _interactive_dialog() {
-	line=$((line+1))
+	let ++line
 	DIALOG="${DIALOG}$(_dialog_options "${cmd_options}" "Parms-Cmd")"
 	rc=0
 	M="$(_dialog_exec "${JA_CONF_DLG}")" || \
@@ -319,7 +319,11 @@ _interactive_dialog() {
 		return 1
 		;;
 	2) # Help
-		JA_DIALOG_LABEL="$(awk 'NR == 1 {if ($1 == "HELP") print $2; exit}' <<< "${M}")"
+		JA_DIALOG_LABEL="$(awk 'NR == 1 {if ($1 == "HELP") {
+			$1=""
+			gsub(/^[[:blank:]]+|[[:blank:]]+$/, "")
+			print }
+			exit }' <<< "${M}")"
 		M="$(_print_line '2,$' <<< "${M}")"
 		lastkey="$(_print_line ${line} <<< "${M}")"
 		;;
@@ -340,7 +344,11 @@ _interactive_dialog() {
 	fi
 
 	cmd_options="$(_print_line "$((line-1))" <<< "${M}")"
-	M="$(_print_line "1,$((line-2))" <<< "${M,,}")"
+	if [ $((line-2)) -gt 0 ]; then
+		M="$(_print_line "1,$((line-2))" <<< "${M,,}")"
+	else
+		M=""
+	fi
 
 	if [ -n "${JA_FKEY_AUTOREFRESH}" ]; then
 		autorefresh="$(test -n "${autorefresh}" || echo "y")"
@@ -389,7 +397,48 @@ _interactive_dialog() {
 	if [ -n "${JA_FKEY_ENTER}" -o \
 	-n "${JA_FKEY_ASSIST}" ]; then
 		if [ -n "${M}" ]; then
-			_${JA_MODULE}_OK
+			local m e sfl_line \
+				err="" i=0 M0="${M}" sfl_c=$(wc -l <<< "${M}")
+			while [ $((++i)) -le ${sfl_c} ]; do
+				m="$(_print_line "${i}" <<< "${M}")"
+				[ -n "${m}" ] || \
+					continue
+				e=""
+				JA_CMD_ARGS=()
+				JA_CMD_CMD=""
+				sfl_line="$(_print_line "${i}" <<< "${subfile}")"
+				if _${JA_MODULE}_lineOK; then
+					if [ -n "${JA_CMD_CMD}" ]; then
+						[ -z "${cmd_options}" ] || \
+							eval JA_CMD_ARGS+=(${cmd_options})
+						if [ -z "${JA_FKEY_CONFIRM}" -a \
+						"${JA_CMD_TERMINAL}" -lt 1 ]; then
+							_cmd_exec_background || e="No"
+						else
+							_cmd_exec || e="No"
+						fi
+					else
+						e="Yes"
+					fi
+				else
+					e="Yes"
+				fi
+				if [ -z "${e}" ]; then
+					M0="$(sed -e ${i}'s|.*||' <<< "${M0}")"
+				else
+					[ "${e}" != "Yes" ] || \
+						_usr_notify "Invalid option '${m}'." "" "y"
+					if [ -z "${err}" ]; then
+						JA_DIALOG_LABEL="${i}"
+						err="Yes"
+					fi
+				fi
+			done
+			if [ -n "${err}" ]; then
+				M="${M0}"
+			else
+				_${JA_MODULE}_refresh "y"
+			fi
 		elif [ -n "${cmd_options}" ] && \
 		eval JA_CMD_ARGS=(${cmd_options}); then
 			if _cmd_dsc "${JA_CMD_ARGS[@]}"; then
@@ -414,7 +463,7 @@ _interactive_dialog() {
 		return 0
 	fi
 	if [ -n "${JA_FKEY_CHGVIEW}" ]; then
-		JA_SEQ=$((JA_SEQ+1))
+		let ++JA_SEQ
 		_${JA_MODULE}_chgview
 		_${JA_MODULE}_refresh
 		return 0
@@ -619,7 +668,8 @@ _find_splfs() {
 
 	unset splf_attrs
 	while read -r splf_attrs; do
-		[ -s "${splf_attrs}" ] || continue
+		[ -s "${splf_attrs}" ] || \
+			continue
 		splf_sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || \
 			splf_sts="RDY"
 		[ -z "${splf_stsl}" ] || \
@@ -737,8 +787,8 @@ _sbsds_selected() {
 }
 
 _find_jobs() {
-	local usrl sbsdl job_stsl jobqsl sbs_type
-	local usr job_sts job_hld job_usr jobq jobq_sts rc sbsd timejob attrs pty
+	local usrl sbsdl job_stsl jobqsl sbs_type \
+		usr job_sts job_hld job_usr jobq jobq_sts rc sbsd timejob attrs pty
 	usrl="${1:-"$(cat "${JA_TMP}users.lst")"}"
 	! grep -qs -iwe "all" <<< "${usrl}" || \
 		usrl="$(cat "${JA_TMP}users.lst")"
@@ -855,8 +905,8 @@ _find_jobs() {
 }
 
 _usr_valid() {
-	local usr
-	local usr_uid
+	local usr \
+		usr_uid
 	usr="${1}"
 	[ -n "${usr}" ] && \
 	usr_uid="$(id -u "${usr}" 2> /dev/null)" && \
@@ -864,8 +914,8 @@ _usr_valid() {
 }
 
 _usr_homedir() {
-	local usr
-	local ent
+	local usr \
+		ent
 	usr="${1:-"${JA_USR:-}"}"
 
 	_usr_valid "${usr}" || return 1
@@ -878,8 +928,8 @@ _usr_homedir() {
 }
 
 _usr_dir() {
-	local usr
-	local home usr_dir
+	local usr \
+		home usr_dir
 	usr="${1:-"${JA_USR:-}"}"
 
 	if [ -L "${JA_SPOOL}${usr}.usr" ]; then
@@ -902,8 +952,8 @@ _usr_dir() {
 }
 
 _job_exist() {
-	local job usr
-	local job_dir usr_dir
+	local job usr \
+		job_dir usr_dir
 	job="${1:-"${JA_JOB}"}"
 	usr="${2:-"${JA_USR}"}"
 
@@ -920,8 +970,8 @@ _job_exist() {
 }
 
 _job_exist_exec() {
-	local job usr job_pid
-	local job_pids job_dir usr_dir
+	local job usr job_pid \
+		job_pids job_dir usr_dir
 	job="${1:-"${JA_JOB}"}"
 	usr="${2:-"${JA_USR}"}"
 	job_pid="${3:-"${JA_PID}"}"
@@ -973,8 +1023,8 @@ _getopt_err_print() {
 }
 
 _getopt_errors() {
-	local result="${1}"
-	local array remainder r
+	local result="${1}" \
+		array remainder r
 
 	[ -n "${result}" ] || return 0
 	_getopt_err_print "${result}" "LNET_GETOPT_ERR_VALUE" "Invalid value"
@@ -1026,9 +1076,8 @@ _cmd_dsc() {
 # prints: field values for this abv
 # returns: true or false
 _cmd_abv_dsc() {
-	local abv="${1}"
-	local objs="${2}"
-	local obj abv_dsc
+	local abv="${1}" objs="${2}" \
+		obj abv_dsc
 	JA_CMD_CMD=""; JA_CMD_OBJ=""; JA_CMD_TERMINAL=""; JA_CMD_USROPT=""; JA_CMD_ABV=""
 	JA_CMD_ACC=""; JA_CMD_NCURSES=""; JA_CMD_NAME=""
 	[ -n "${abv}" ] || \
@@ -1772,8 +1821,7 @@ _cmd_save() {
 }
 
 _cmd_retrieve() {
-	local l
-	local c=0
+	local l c
 
 	history -c && \
 		history -r || \
@@ -1782,7 +1830,8 @@ _cmd_retrieve() {
 	[ -n "${l}" ] || \
 		return 0
 
-	while :; do
+	c=0
+	while let c++; do
 		cmd_index="${cmd_index:-"1"}"
 		[ 1 -le ${cmd_index} ] || \
 			cmd_index=1
@@ -1792,10 +1841,9 @@ _cmd_retrieve() {
 		sed -nre '\|^[[:blank:]]*[[:digit:]]+[[:blank:]]+([^[:blank:]]+.*)$|{s||\1|p;q0};q1'; then
 			return 0
 		fi
-		c=$((c+1))
 		[ ${c} -lt 3 ] || \
 			return 0
-		cmd_index=$((cmd_index+1))
+		let ++cmd_index
 	done
 	:
 }

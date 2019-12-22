@@ -58,7 +58,7 @@ _jafg_aria2c_flv() {
 
 	i=0
 	for range in ${ranges}; do
-		i=$((i+1))
+		let ++i
 		start="$(echo "${range}" | cut -f1 -s -d '-')"
 		end="$(echo "${range}" | cut -f2 -s -d '-')"
 		flv1="${flv}_${i}.flv"
@@ -87,7 +87,7 @@ _jafg_aria2c_flv() {
 		while kill -0 "${pid}" && \
 		[ ${c} -gt 0 ] && \
 		[ $(stat -c %s "${flv1}" 2> /dev/null || echo 0) -lt $len ]; do
-			c=$((c-1))
+			let --c
 			sleep 1
 		done
 
@@ -160,7 +160,7 @@ _jafg_curl_part() {
 
 	i=0
 	for range in ${ranges}; do
-		i=$((i+1))
+		let ++i
 		fname="${FNAME}.part$i"
 		fheader="${FNAME}.header$i"
 
@@ -194,10 +194,9 @@ _jafg_multipart() {
 	rs=0
 	i=0
 	len0=$((len-1))
-	while :; do
+	while let ++i; do
 		[ ${rs} -le ${len0} ] || \
 			break
-		i=$((i+1))
 		idx="$(printf '%03d\n' $i)"
 		str=${rs}
 		end=$((rs+part-1))
@@ -211,8 +210,7 @@ _jafg_multipart() {
 		fname="${FNAME}.part${idx}"
 		fheader="${FNAME}.header${idx}"
 		fnames+=( "${fname}" )
-		while [ ${c} -gt 0 ]; do
-			c=$((c-1))
+		while [ $((c--)) -gt 0 ]; do
 			# TODO: check current length of the file, if present
 			# and compute the new variables range and str
 			# because options to continue are not valid

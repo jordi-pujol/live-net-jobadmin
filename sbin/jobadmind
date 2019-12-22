@@ -152,10 +152,6 @@ _enable_daemon_debug() {
 	:
 }
 
-_text_date() {
-	echo "[$(_datetime)]"
-}
-
 _jobadmin_notify_send() {
 	local pid_sess
 	if [ -n "${leader}" ]; then
@@ -183,7 +179,7 @@ _jobadmin_notify_send() {
 	_sudo "${usr}" \
 		notify-send ${notifyID:+"-r"} ${notifyID} -u "${urgency}" \
 		${icon:+"-i"} ${icon} -t "${timeout}" -a "Jobadmin" \
-		"$(_text_date)" "${msg}"
+		"$(_datetime)" "${msg}"
 }
 
 _jobadmin_msg_usr() {
@@ -276,7 +272,7 @@ _jobadmin_msg_usr() {
 			[ "$(stat -c %U "${terminal}")" = "${usr}" ] && \
 			[ $(( "0$(stat -c %a "${terminal}")" & "0020" )) -gt 0 ] || \
 				continue
-			printf '%s\n' "$(_text_date) ${msg}" > "${terminal}" || :
+			printf '%s\n' "$(_datetime) ${msg}" > "${terminal}" || :
 			[ -z "${reuse_ID}" ] || \
 				[ "${#terminals[@]}" -ne 0 ] || \
 				printf "%u\n" "0"

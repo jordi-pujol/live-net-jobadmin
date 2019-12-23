@@ -1,3 +1,10 @@
+jobadmin (1.84) unstable; urgency=medium
+
+  * work with a list of job queues.
+    wrkjobq --jobql
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 22 Dec 2019 14:45:38 +0100
+
 jobadmin (1.83) unstable; urgency=medium
 
   * refresh button equivalence to F5

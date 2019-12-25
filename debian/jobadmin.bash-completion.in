@@ -116,7 +116,7 @@ _param_values() {
 			case "JA_OUTPTY":
 				print idnt "COMPREPLY=( $( compgen -W \"{1..5}\" -- \"$cur\" ) )"
 				break
-			case "JA_PIDL":
+			case "JA_PIDS":
 				print idnt "if [[ $cur =~ [al] ]]; then"
 				print idnt "\tCOMPREPLY=( \"all\" )"
 				print idnt "elif [[ $cur ]]; then"

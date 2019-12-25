@@ -37,10 +37,10 @@ wrkusrjob [options]
 
 - work with user's jobs in a form"
 
-_wrkusrjob_options="JA_USRL pr@
-JA_JOBQL pr@
-JA_JOB_STSL pr@
-JA_SBSTYPL pr@
+_wrkusrjob_options="JA_USRS pr@
+JA_JOBQS pr@
+JA_JOB_STSS pr@
+JA_SBSTYPS pr@
 JA_SEQ"
 
 _wrkusrjob_chgview() {
@@ -65,8 +65,8 @@ _wrkusrjob_refresh() {
 			return 0
 		sleep 1
 	fi
-	subfile="$(_find_jobs "${JA_USRL}" "" "${JA_JOB_STSL}" \
-		"${JA_JOBQL}" "${JA_SBSTYPL}" | \
+	subfile="$(_find_jobs "${JA_USRS}" "" "${JA_JOB_STSS}" \
+		"${JA_JOBQS}" "${JA_SBSTYPS}" | \
 		sort -t $'\t' -k 5n,5 -k 9nr,9 -k 1n,1)"
 	sfl_rec_count="$(wc -l <<< "${subfile}")"
 }
@@ -75,16 +75,18 @@ _wrkusrjob_lineOK() {
 	_cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS" || \
 		return 1
 	if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+		local job="${sfl_line/[[:blank:]]*/}"
 		_options_reuse "${JA_CMD_CMD}" \
 		"JA_JOB=$(awk '{print $2}' <<< "${sfl_line}")" \
 		"JA_USR=$(awk '{print $3}' <<< "${sfl_line}")"
 	elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
 		_options_reuse "${JA_CMD_CMD}" \
-		"JA_JOBQ=$(awk '{print $7}' <<< "${sfl_line}" | cut -f 1 -d '/')"
+		"JA_JOBQ=$(awk '{print $7}' <<< "${sfl_line}" | \
+			cut -f 1 -d '/')"
 	elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
 		_options_reuse "${JA_CMD_CMD}" \
 		"JA_OUTQ=$(_read_option "JA_OUTQ" \
-		"$(awk '{print $NF}' <<< "${sfl_line}")")"
+			"$(awk '{print $NF}' <<< "${sfl_line}")")"
 	fi
 }
 
@@ -116,7 +118,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 			job_pids=""
 			job_pid=""
 			if [ -s "${attrs}" ]; then
-				job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+				job_pids="$(_read_option "JA_EXECS" "${attrs}")" || :
 				job_pid="$(sed -re 's/^.* //' -e '/:/d' <<< "${job_pids}")"
 				if [ "${sts}" = "ACT" ] && \
 				! kill -0 "${job_pid}" 2> /dev/null; then

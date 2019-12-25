@@ -1,3 +1,86 @@
+**********************************************
+  * TODO:
+pwrdwnsys: controlled cpu and network utilization
+
+grep -se "^cpu[[:blank:]]" /proc/stat
+> cat /proc/stat
+cpu  usr nic  sys     idle iowait irq softirq steal rest
+cpu  2255 34 2290 22625563   6290 127     456     0 0 0
+cpu  1569  0 1012   243438   8918 143      68     0 0 0
+
+working_time = usr + nic + sys + irq + softirq + steal
+idle_time = idle + iowait
+
+The very first "cpu" line aggregates the numbers in all of the other "cpuN" lines.
+These numbers identify the amount of time the CPU has spent performing different kinds of work. Time units are in USER_HZ or Jiffies (typically hundredths of a second).
+The meanings of the columns are as follows, from left to right:
+    user: normal processes executing in user mode
+    nice: niced processes executing in user mode
+    system: processes executing in kernel mode
+    idle: twiddling thumbs
+    iowait: waiting for I/O to complete
+    irq: servicing interrupts
+    softirq: servicing softirqs
+
+
+from busybox, its top magic is:
+
+static const char fmt[] ALIGN1 = "cp%*s %llu %llu %llu %llu %llu %llu %llu %llu";
+
+    int ret;
+
+    if (!fgets(line_buf, LINE_BUF_SIZE, fp) || line_buf[0] != 'c' /* not "cpu" */)
+        return 0;
+    ret = sscanf(line_buf, fmt,
+            &p_jif->usr, &p_jif->nic, &p_jif->sys, &p_jif->idle,
+            &p_jif->iowait, &p_jif->irq, &p_jif->softirq,
+            &p_jif->steal);
+    if (ret >= 4) {
+        p_jif->total = p_jif->usr + p_jif->nic + p_jif->sys + p_jif->idle
+            + p_jif->iowait + p_jif->irq + p_jif->softirq + p_jif->steal;
+        /* procps 2.x does not count iowait as busy time */
+        p_jif->busy = p_jif->total - p_jif->idle - p_jif->iowait;
+    }
+
+
+/sys/class/block/dev.../stat
+Name            units         description
+----            -----         -----------
+read I/Os       requests      number of read I/Os processed
+read merges     requests      number of read I/Os merged with in-queue I/O
+read sectors    sectors       number of sectors read
+read ticks      milliseconds  total wait time for read requests
+write I/Os      requests      number of write I/Os processed
+...
+# cat /sys/class/block/sda2/stat
+    read     readm   reads    readt     write    rest
+    1578     3519    57962    42543      322      422     6672     2767        0     1605    44489        0        0        0        0
+
+for iface in $(ls -d1 /sys/class/net/* 2>/dev/null); do
+	cat "${iface}/statistics/rx_bytes"
+	cat "${iface}/statistics/tx_bytes"
+done
+
+	if [ ${MinRxBps} -ne 0 ]; then
+		local r=$(GetRxBytes) c=$(_UTCseconds)
+		if [ -n "${CheckTime}" ]; then
+			local b=$((${r}-RxBytes)) \
+				t=$((${c}-CheckTime))
+			if [ ${t} -gt 0 ] && \
+			[ $((b/t)) -ge ${MinRxBps} ]; then
+				rc=0
+				_msg "Networking of ${HotSpot}:'${WwanSsid}' to" \
+					"the external network is working"
+			fi
+			[ -z "${Debug}" ] || \
+				_applog "STA interface received ${b} bytes in ${t} seconds"
+		fi
+		CheckTime=${c}
+		RxBytes=${r}
+	fi
+
+
+**********************************************
   * TODO:
   jobadmin-flashgot:
   by now the best downloader is aria2c.

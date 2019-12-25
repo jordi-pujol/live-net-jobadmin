@@ -31,9 +31,9 @@
 
 . "${JA_LIB}libparms"
 
-_wrksplf_options="JA_SPLF_STSL pr@
-JA_OUTQL pr@
-JA_USRL pr@
+_wrksplf_options="JA_SPLF_STSS pr@
+JA_OUTQS pr@
+JA_USRS pr@
 JA_JOB@
 JA_USR@
 JA_PID@
@@ -105,7 +105,7 @@ _wrksplf_splfs() {
 	local outq_previous
 	local outqs
 
-	outqs="$(tr -s '[,[:blank:]]' '\n' <<< "${JA_OUTQL}" | sort)"
+	outqs="$(tr -s '[,[:blank:]]' '\n' <<< "${JA_OUTQS}" | sort)"
 	outq_previous=""
 	unset wtr outq splf_sts_order outpty datesplf \
 			splf job job_usr job_pid splf_sts outq_sts splf_attrs
@@ -160,12 +160,12 @@ _wrksplf_refresh() {
 	fi
 
 	if [ "${JA_SEQ}" = "1" ]; then
-		list_splfs="$(_find_splfs "${JA_USRL}" \
-			"" "${JA_SPLF_STSL}" "${JA_OUTQL}" "${JA_JOB}" "${JA_PID}" | \
+		list_splfs="$(_find_splfs "${JA_USRS}" \
+			"" "${JA_SPLF_STSS}" "${JA_OUTQS}" "${JA_JOB}" "${JA_PID}" | \
 			sort -t $'\t' -k 2,2 -k 3n,3 -k 4nr,4 -k 5n,5)"
 	else
-		list_splfs="$(_find_splfs "${JA_USRL}" \
-			"" "${JA_SPLF_STSL}" "${JA_OUTQL}" "${JA_JOB}" "${JA_PID}" | \
+		list_splfs="$(_find_splfs "${JA_USRS}" \
+			"" "${JA_SPLF_STSS}" "${JA_OUTQS}" "${JA_JOB}" "${JA_PID}" | \
 			sort -t $'\t' -k 3n,3 -k 4nr,4 -k 5n,5)"
 	fi
 
@@ -196,19 +196,20 @@ _wrksplf_lineOK() {
 		_cmd_abv_dsc "${m}" "SPLF,JOB,WTR,OUTQ,SYS" || \
 			return 1
 		if echo "${JA_CMD_OBJ}" | grep -qswe "SPLF"; then
+			local job="${sfl_line/[[:blank:]]*/}"
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_SPLF=$(cut -f 1 -s -d '.' <<< "${sfl_line}")" \
-			"JA_JOB=$(cut -f 2 -s -d '.' <<< "${sfl_line}")" \
-			"JA_USR=$(cut -f 3 -s -d '.' <<< "${sfl_line}")" \
-			"JA_PID=$(cut -f 4 -s -d '.' <<< "${sfl_line}")"
+			"JA_SPLF=$(cut -f 1 -s -d '.' <<< "${job}")" \
+			"JA_JOB=$(cut -f 2 -s -d '.' <<< "${job}")" \
+			"JA_USR=$(cut -f 3 -s -d '.' <<< "${job}")" \
+			"JA_PID=$(cut -f 4 -s -d '.' <<< "${job}")"
 		elif echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+			local job="${sfl_line/[[:blank:]]*/}"
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_JOB=$(cut -f 2 -s -d '.' <<< "${sfl_line}")" \
-			"JA_USR=$(cut -f 3 -s -d '.' <<< "${sfl_line}")" \
-			"JA_PID=$(cut -f 4 -s -d '.' <<< "${sfl_line}")"
+			"JA_JOB=$(cut -f 2 -s -d '.' <<< "${job}")" \
+			"JA_USR=$(cut -f 3 -s -d '.' <<< "${job}")" \
+			"JA_PID=$(cut -f 4 -s -d '.' <<< "${job}")"
 		elif echo "${JA_CMD_OBJ}" | grep -qswe "WTR"; then
-			wtr="$(awk -v i="${i}" \
-			'NR == i {print $7; exit}' <<< "${subfile}" | \
+			wtr="$(awk '{print $7; exit}' <<< "${sfl_line}" | \
 			cut -f 1 -d '/')"
 			[ "${wtr}" != "-" ] || \
 				wtr=""
@@ -216,8 +217,7 @@ _wrksplf_lineOK() {
 			"JA_WTR=${wtr}"
 		elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_OUTQ=$(awk -v i="${i}" \
-			'NR == i {print $6; exit}' <<< "${subfile}" | \
+			"JA_OUTQ=$(awk '{print $6; exit}' <<< "${sfl_line}" | \
 			cut -f 1 -d '/')"
 		fi
 		;;

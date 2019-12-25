@@ -1,7 +1,7 @@
 jobadmin (1.84) unstable; urgency=medium
 
-  * work with a list of job queues.
-    wrkjobq --jobql
+  * wrkjobq: change single jobq parameter to work with a list of job queues.
+    wrkjobq --jobq -> wrkjobq --jobql
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 22 Dec 2019 14:45:38 +0100
 
@@ -264,7 +264,7 @@ jobadmin (1.52) unstable; urgency=medium
     configuration.
   * Command dltjob:
     Extended to remove only a list of execution pids from one job.
-  * job attribute JA_PIDS:
+  * job attribute JA_EXECS:
     Add string: jobpid:cause
     where cause is one of: LCK, ACT, OK, CAN, ERR.
      LCK can not start for lock, ACT when is running, CAN cancelled while

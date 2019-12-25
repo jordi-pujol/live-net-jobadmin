@@ -38,13 +38,13 @@ jobmenu object-type cmdname
 - shows an introduction form for jobadmin commands
 and lets the user choose."
 
-_jobmenu_options="JA_OBJ pr@
+_jobmenu_options="JA_OBJS pr@
 JA_COMMAND p"
 
 _jobmenu_refresh() {
-	# global JA_OBJ all_cmds all_cmds_count
+	# global JA_OBJS all_cmds all_cmds_count
 
-	all_cmds="$(awk -v obj="${JA_OBJ}" \
+	all_cmds="$(awk -v obj="${JA_OBJS}" \
 'BEGIN{if (obj != "ALL") {
 	split(obj, a, ",")
 	for (v in a) g[a[v]]

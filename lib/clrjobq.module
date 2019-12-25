@@ -31,8 +31,8 @@
 
 _clrjobq_options="JA_JOBQ pr@
 JA_JOBACTION pr@
-JA_JOB_STSL pr@
-JA_USRL pr@
+JA_JOB_STSS pr@
+JA_USRS pr@
 JA_DAYSOLD pr"
 
 _clrjobq() {
@@ -54,10 +54,10 @@ _clrjobq() {
 			continue
 		[ "$(_read_option "JA_JOBQ" "${attrs}")" = "${JA_JOBQ}" ] || \
 			continue
-		if [ "${JA_JOB_STSL}" != "ALL" ]; then
+		if [ "${JA_JOB_STSS}" != "ALL" ]; then
 			sts="$(_read_option "JA_JOB_STS" "${attrs}")" || \
 				sts="JOBQ"
-			grep -qswe "${sts}" <<< "${JA_JOB_STSL}" || \
+			grep -qswe "${sts}" <<< "${JA_JOB_STSS}" || \
 				continue
 		fi
 		# don't delete jobs in status OUTQ/ERR or SAVED
@@ -86,7 +86,7 @@ _clrjobq() {
 			found="Warning"
 
 		unset attrs
-	done < <(_find_jobs_files "${JA_USRL}" "job.attrs" "${JA_DAYSOLD}")
+	done < <(_find_jobs_files "${JA_USRS}" "job.attrs" "${JA_DAYSOLD}")
 
 	_usr_notify "Job queue '${JA_JOBQ}' cleared."
 } # clrjobq

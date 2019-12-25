@@ -31,8 +31,8 @@
 
 _clroutq_options="JA_OUTQ pr@
 JA_SPLFACTION pr@
-JA_SPLF_STSL pr@
-JA_USRL pr@
+JA_SPLF_STSS pr@
+JA_USRS pr@
 JA_DAYSOLD pr"
 
 _clroutq() {
@@ -56,12 +56,12 @@ _clroutq() {
 			continue
 		[ "$(_read_option "JA_OUTQ" "${splf_attrs}")" = "${JA_OUTQ}" ] || \
 			continue
-		if [ "${JA_SPLF_STSL}" != "ALL" ]; then
+		if [ "${JA_SPLF_STSS}" != "ALL" ]; then
 			sts="$(_read_option "JA_SPLF_STS" "${splf_attrs}")" || \
 				sts="RDY"
 			# ! _read_option "JA_HLD" "${splf_attrs}" > /dev/null || \
 			#	splf_sts="${sts}/HLD"
-			grep -qswe "${sts}" <<< "${JA_SPLF_STSL}" || \
+			grep -qswe "${sts}" <<< "${JA_SPLF_STSS}" || \
 				continue
 		fi
 
@@ -90,7 +90,7 @@ _clroutq() {
 			found="Warning"
 
 		unset splf_attrs
-	done < <(_find_jobs_files "${JA_USRL}" "*.splfa" "${JA_DAYSOLD}")
+	done < <(_find_jobs_files "${JA_USRS}" "*.splfa" "${JA_DAYSOLD}")
 
 	_usr_notify "Output queue '${JA_OUTQ}' cleared."
 } # clroutq

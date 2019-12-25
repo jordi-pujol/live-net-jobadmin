@@ -214,18 +214,18 @@ if [ -n "${JA_MSGQ:+${JA_MSGQ//[^.]/}}" ]; then
 	fi
 fi
 
-if [ -n "${JA_OUTQL:-""}" ]; then
-	! grep -qsiwe "all" <<< "${JA_OUTQL}" || \
-		JA_OUTQL="$(cat "${JA_TMP}outqs.lst")"
-	JA_OUTQL="$(sort --unique  <<< "${JA_OUTQL//[^[:alnum:]_]/$'\n'}" | \
+if [ -n "${JA_OUTQS:-""}" ]; then
+	! grep -qsiwe "all" <<< "${JA_OUTQS}" || \
+		JA_OUTQS="$(cat "${JA_TMP}outqs.lst")"
+	JA_OUTQS="$(sort --unique  <<< "${JA_OUTQS//[^[:alnum:]_]/$'\n'}" | \
 		_comma_separated)"
 fi
-if [ -n "${JA_USRL:-""}" ]; then
-	! grep -qswe "current" <<< "${JA_USRL}" || \
-		JA_USRL="${JA_USRL//current/${JA_USRACT}}"
-	! grep -qsiwe "all" <<< "${JA_USRL}" || \
-		JA_USRL="$(cat "${JA_TMP}users.lst")"
-	JA_USRL="$(sort --unique  <<< "${JA_USRL//[^[:alnum:]_]/$'\n'}" | \
+if [ -n "${JA_USRS:-""}" ]; then
+	! grep -qswe "current" <<< "${JA_USRS}" || \
+		JA_USRS="${JA_USRS//current/${JA_USRACT}}"
+	! grep -qsiwe "all" <<< "${JA_USRS}" || \
+		JA_USRS="$(cat "${JA_TMP}users.lst")"
+	JA_USRS="$(sort --unique  <<< "${JA_USRS//[^[:alnum:]_]/$'\n'}" | \
 	_comma_separated)"
 fi
 if [ -n "${JA_USR:-""}" ]; then
@@ -233,10 +233,10 @@ if [ -n "${JA_USR:-""}" ]; then
 else
 	JA_USR="${JA_USRACT}"
 fi
-if [ -n "${JA_WTRM:-""}" ]; then
-	! grep -qsiwe "all" <<< "${JA_WTRM}" || \
-		JA_WTRM="-,$(cat "${JA_TMP}rwtrs.lst")"
-	JA_WTRM="$(sort --unique <<< "${JA_WTRM//[^[:alnum:]_]/$'\n'}" | \
+if [ -n "${JA_WTRS:-""}" ]; then
+	! grep -qsiwe "all" <<< "${JA_WTRS}" || \
+		JA_WTRS="-,$(cat "${JA_TMP}rwtrs.lst")"
+	JA_WTRS="$(sort --unique <<< "${JA_WTRS//[^[:alnum:]_]/$'\n'}" | \
 	_comma_separated)"
 fi
 

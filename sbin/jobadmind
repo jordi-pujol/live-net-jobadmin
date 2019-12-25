@@ -516,11 +516,11 @@ _jobadmin_job_end() {
 	[ -n "${cause}" ] || \
 		cause="$(_read_option "JA_CAUSE" "${attrs_exec}")" || \
 		cause="CAN"
-	job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+	job_pids="$(_read_option "JA_EXECS" "${attrs}")" || :
 	# associate the cause to the corresponding pid
 	if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]*| \
 	{s||\1:"${cause}"|p;q0};q1" <<< "${job_pids}")"; then
-		_set_option "${attrs}" "JA_PIDS" "${ja_pids}"
+		_set_option "${attrs}" "JA_EXECS" "${ja_pids}"
 	else
 		_log "Error: when updating cause ${cause} for job '${job}.${usr}.${job_pid}'."
 	fi
@@ -629,10 +629,10 @@ _jobadmin_exec() {
 
 	attrs_exec="${JA_JOB_DIR}job-${job_pid}.attrs"
 	_set_option "${attrs}" "JA_RC" ""
-	job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+	job_pids="$(_read_option "JA_EXECS" "${attrs}")" || :
 	cp "${attrs}" "${attrs_exec}"
 	_set_option "${attrs_exec}" "JA_CAUSE" ""
-	_set_option "${attrs_exec}" "JA_PIDS" ""
+	_set_option "${attrs_exec}" "JA_EXECS" ""
 	_set_option "${attrs_exec}" "JA_TTY" "$(tty)"
 	_set_option "${attrs_exec}" "JA_DATESTR" "${timestart}"
 	pidfile="${JA_JOB_DIR}job.pid"
@@ -640,7 +640,7 @@ _jobadmin_exec() {
 	! flock --shared --timeout 1 ${fd2}; then
 			_usr_notify "Error: Can't execute job '${JA_JOB}.${JA_USR}' because it's locked." >&2
 			_set_option "${attrs}" "JA_JOB_STS" "END"
-			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
+			_set_option "${attrs}" "JA_EXECS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
 			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_CAUSE" "LCK"
 			_set_option "${attrs_exec}" "JA_RC" "127"
@@ -656,7 +656,7 @@ _jobadmin_exec() {
 			# we should never manage jobq and sbsd descriptions while jobs are active
 			_usr_notify "Error: Can't execute job '${JA_JOB}.${JA_USR}' because jobq or sbsd are locked." >&2
 			_set_option "${attrs}" "JA_JOB_STS" "END"
-			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
+			_set_option "${attrs}" "JA_EXECS" "${job_pids}${job_pids:+" "}${job_pid}:LOCK"
 			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_CAUSE" "LCK"
 			_set_option "${attrs_exec}" "JA_RC" "127"
@@ -676,7 +676,7 @@ _jobadmin_exec() {
 			sbs_typ="$(_read_option "JA_SBSTYP" "${attrs}")" || :
 			_set_option "${attrs_exec}" "JA_SBSTYP" "${sbs_typ}"
 
-			_set_option "${attrs}" "JA_PIDS" "${job_pids}${job_pids:+" "}${job_pid}:ACT"
+			_set_option "${attrs}" "JA_EXECS" "${job_pids}${job_pids:+" "}${job_pid}:ACT"
 			_set_option "${attrs}" "JA_JOB_STS" "ACT"
 			printf '%s\n' "${job_pid}" > "${pidfile}"
 
@@ -885,7 +885,8 @@ _jobadmin_resume_offset() {
 
 _jobadmin_pwroff() {
 	local attrs pwr_restart \
-		delay urgency immed fd0
+		delay urgency immed fd0 \
+		cpu disk network
 
 	attrs="${JA_TMP}pwrdwnsys.attrs"
 	pwr_restart="$(_read_option "JA_RESTART" "${attrs}")" || \
@@ -893,7 +894,7 @@ _jobadmin_pwroff() {
 
 	delay="$(_read_option "JA_DELAY" "${attrs}")" || \
 		delay=1
-	immed="$(test "IMMED" != "$(cat "${JA_TMP}pwrdwnsys.now")" || echo "y")"
+	immed="$(grep -se "IMMED" "${JA_TMP}pwrdwnsys.now")"
 	if flock --exclusive --timeout 1 ${fd0}; then
 		: > "${JA_TMP}pwrdwnsys.notifyIDs"
 		while [ -s "${JA_TMP}pwrdwnsys.now" ] && \
@@ -1727,6 +1728,18 @@ _jobadmin_wtrs_check() {
 	:
 }
 
+_jobadmin_system_idle() {
+	if grep -qswie "cpu" <<< "${JA_IDLE}" ]; then
+		:
+	fi
+	if grep -qswie "disk" <<< "${JA_IDLE}" ]; then
+		:
+	fi
+	if grep -qswie "network" <<< "${JA_IDLE}" ]; then
+		:
+	fi
+}
+
 # run jobs that are waiting in non-interactive job queues
 _jobadmin_monitor() {
 	local pid \
@@ -1802,6 +1815,8 @@ _jobadmin_monitor() {
 		fi
 
 		# the system is idle?
+		_jobadmin_system_idle || \
+			return 0
 		if [ ${JA_CPU_IDLE:-0} -gt 0 ]; then
 			# the method of computing idle cpu time not shows active processes
 			# on modern computers,
@@ -1870,7 +1885,7 @@ _jobadmin_daemon() {
 
 	# create directories
 	mkdir -p -m u=rwx,g=rx,o=rx "${JA_SPOOL}"
-	mkdir -p "${JA_PIDS}"
+	mkdir -p "${JA_RUNDIR}"
 	mkdir -p -m u=rwx,g=rx,o=rx "${JA_TMP}"
 
 	_enable_daemon_debug

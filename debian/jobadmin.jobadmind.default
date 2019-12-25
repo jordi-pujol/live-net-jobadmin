@@ -6,7 +6,7 @@ if [ -z "${JA_TMP:+"${JA_TMP}"}" ]; then
 # directories, slash terminated
 JA_TMP="/var/tmp/jobadmin.d/"
 JA_SPOOL="/var/spool/jobadmin.d/"
-JA_PIDS="/run/jobadmin.d/"
+JA_RUNDIR="/run/jobadmin.d/"
 JA_LIB="/usr/lib/jobadmin/"
 JA_CONF_DIR="/etc/jobadmin.d/"
 
@@ -30,9 +30,9 @@ JA_CONF_DLG_F4="${JA_TMP}dialogrc-f4.conf"
 # daemon files
 JA_DAEMON="/usr/sbin/jobadmind"
 JA_PIDFILE="/run/jobadmind.pid"
-JA_PIPE="${JA_PIDS}jobadmin.pipe"
-JA_PIPE_WTR="${JA_PIDS}jobadmin-wtr.pipe"
-JA_PIPE_DAEMON="${JA_PIDS}jobadmin-daemon.pipe"
+JA_PIPE="${JA_RUNDIR}jobadmin.pipe"
+JA_PIPE_WTR="${JA_RUNDIR}jobadmin-wtr.pipe"
+JA_PIPE_DAEMON="${JA_RUNDIR}jobadmin-daemon.pipe"
 JA_LOG="/var/log/jobadmind"
 
 # process spool files
@@ -59,7 +59,7 @@ JA_CPU_IDLE=0
 
 #JA_DISABLED="yes"
 
-readonly JA_TMP JA_SPOOL JA_PIDS JA_LIB
+readonly JA_TMP JA_SPOOL JA_RUNDIR JA_LIB
 # JA_CONF may be modified
 readonly JA_CONF_PARMDFTS JA_CONF_CMDS JA_CONF_FKEYS JA_CONF_JOBDS JA_CONF_JOBQS JA_CONF_OUTQS JA_CONF_SBSDS JA_CONF_USRS JA_CONF_WTRS JA_CONF_DLG
 readonly JA_PIDFILE JA_PIPE JA_LOG

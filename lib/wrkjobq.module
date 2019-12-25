@@ -37,8 +37,8 @@ wrkjobq [options]
 
 - display a form to work with jobs in a list of job queues"
 
-_wrkjobq_options="JA_JOBQL pr@
-JA_JOB_STSL pr@
+_wrkjobq_options="JA_JOBQS pr@
+JA_JOB_STSS pr@
 JA_SEQ"
 
 _wrkjobq_chgview() {
@@ -63,7 +63,7 @@ _wrkjobq_refresh() {
 			return 0
 		sleep 1
 	fi
-	subfile="$(_find_jobs "" "" "${JA_JOB_STSL}" "${JA_JOBQL}" "" | \
+	subfile="$(_find_jobs "" "" "${JA_JOB_STSS}" "${JA_JOBQS}" "" | \
 		sort -t $'\t' -k 7,7 -k 5n,5 -k 9nr,9 -k 1n,1)"
 	sfl_rec_count="$(wc -l <<< "${subfile}")"
 }
@@ -77,11 +77,12 @@ _wrkjobq_lineOK() {
 		"JA_USR=$(awk '{print $3}' <<< "${sfl_line}")"
 	elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
 		_options_reuse "${JA_CMD_CMD}" \
-		"JA_JOBQ=$(awk '{print $7}' <<< "${sfl_line}" | cut -f 1 -d '/')"
+		"JA_JOBQ=$(awk '{print $7}' <<< "${sfl_line}" | \
+			cut -f 1 -d '/')"
 	elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
 		_options_reuse "${JA_CMD_CMD}" \
 		"JA_OUTQ=$(_read_option "JA_OUTQ" \
-		"$(awk '{print $NF}' <<< "${sfl_line}")")"
+			"$(awk '{print $NF}' <<< "${sfl_line}")")"
 	fi
 }
 
@@ -113,7 +114,7 @@ printf $7" "}' "${JA_CONF_CMDS}")"
 			job_pids=""
 			job_pid=""
 			if [ -s "${attrs}" ]; then
-				job_pids="$(_read_option "JA_PIDS" "${attrs}")" || :
+				job_pids="$(_read_option "JA_EXECS" "${attrs}")" || :
 				job_pid="$(sed -re 's/^.* //' -e '/:/d' <<< "${job_pids}")"
 				if [ "${sts}" = "ACT" ] && \
 				! kill -0 "${job_pid}" 2> /dev/null; then

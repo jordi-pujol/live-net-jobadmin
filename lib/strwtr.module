@@ -30,7 +30,7 @@
 # strwtr
 
 _strwtr_options="JA_WTR pr@
-JA_OUTQL p@
+JA_OUTQS p@
 JA_PRT"
 
 _strwtr() {
@@ -51,12 +51,12 @@ _strwtr() {
 		return 0
 	fi
 
-	if [ -z "${JA_OUTQL}" ]; then
-		JA_OUTQL="$(awk -v wtr="${JA_WTR}" '$2 == wtr {print $1}' "${JA_CONF_OUTQS}" | sort)"
-	elif grep -qswe "all" <<< "${JA_OUTQL}"; then
-		JA_OUTQL="$(awk '{print $1}' "${JA_CONF_OUTQS}" | sort)"
+	if [ -z "${JA_OUTQS}" ]; then
+		JA_OUTQS="$(awk -v wtr="${JA_WTR}" '$2 == wtr {print $1}' "${JA_CONF_OUTQS}" | sort)"
+	elif grep -qswe "all" <<< "${JA_OUTQS}"; then
+		JA_OUTQS="$(awk '{print $1}' "${JA_CONF_OUTQS}" | sort)"
 	fi
-	JA_OUTQL="$(tr -s '[,[:blank:]]' '\n' <<< "${JA_OUTQL}" | \
+	JA_OUTQS="$(tr -s '[,[:blank:]]' '\n' <<< "${JA_OUTQS}" | \
 		sort | \
 		_comma_separated)"
 	if [ -z "${JA_PRT}" ]; then
@@ -66,7 +66,7 @@ _strwtr() {
 	fi
 
 	found=""; foundprt=""
-# 	_usr_notify "Checking if output queues '${JA_OUTQL}' are available."
+# 	_usr_notify "Checking if output queues '${JA_OUTQS}' are available."
 # 	_usr_notify "Checking if printer '${JA_PRT}' is available."
 	unset wtr1 prt wtr_eml wtr_action wtr_autostr wtr_perms
 	while read wtr1 prt wtr_eml wtr_action wtr_autostr wtr_perms rest; do
@@ -74,7 +74,7 @@ _strwtr() {
 		if ! _read_option "JA_WTR_STS" "${JA_SPOOL}${wtr1}.wtr" > /dev/null 2>&1; then
 			for outq in $(_read_option "JA_WTR_OUTQS" "${JA_SPOOL}${wtr1}.wtr"); do
 				[ -n "${outq}" ] || continue
-				! grep -qswe "${outq}" <<< "${JA_OUTQL}" || \
+				! grep -qswe "${outq}" <<< "${JA_OUTQS}" || \
 					found="${found:+"${found} "}${outq}/${wtr1}"
 			done
 			if prt1="$(_read_option "JA_PRT" "${JA_SPOOL}${wtr1}.wtr")" && \
@@ -92,12 +92,12 @@ _strwtr() {
 	[ -z "${foundprt}" ] || \
 		return 1
 
-	if _set_option "${wtr}" "JA_WTR_OUTQS" "${JA_OUTQL}" && \
+	if _set_option "${wtr}" "JA_WTR_OUTQS" "${JA_OUTQS}" && \
 	_set_option "${wtr}" "JA_PRT" "${JA_PRT}" && \
 	_set_option "${wtr}" "JA_WTR_STS" "" && \
 	_pipe_write "_jobadmin"; then
 		_usr_notify "Starting ${hld:+"a held "}writer '${JA_WTR}' \
-to printer '${JA_PRT}' from output queues '${JA_OUTQL}'."
+to printer '${JA_PRT}' from output queues '${JA_OUTQS}'."
 	else
 		_usr_notify "Error: Not authorized to manage writer '${JA_WTR}'."
 		return 1

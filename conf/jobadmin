@@ -128,7 +128,12 @@ env -i JA_JOB=@JOB JA_USR=@USR JA_CGRP=@CGRP JA_DAEMON=/usr/sbin/jobadmind \
 fi
 readonly JA_CGEXEC JA_CGEXEC_INTER
 
-# Power management commands are executed by the jobadmin daemon, user root
+# Power management
+# Check cpu time, disk read/write and network traffic
+#    before starting execution of a controlled pwrdwnsys command.
+#JA_IDLE="cpu,disk,network"
+JA_IDLE=""
+# commands are executed by the jobadmin daemon, user root
 # KDE4, ConsoleKit, UPower
 # JA_CMD_POWEROFF='dbus-send --system --print-reply --dest="org.freedesktop.ConsoleKit" /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Stop'
 # JA_CMD_REBOOT='dbus-send --system --print-reply --dest="org.freedesktop.ConsoleKit" /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Restart'
@@ -230,7 +235,7 @@ elif grep -qswe freeze /sys/power/state; then \
 echo platform > /sys/power/disk && echo freeze > /sys/power/state; \
 fi'
 fi
-readonly JA_CMD_POWEROFF JA_CMD_POWEROFF_IMMED JA_CMD_HALT JA_CMD_HALT_IMMED \
+readonly JA_IDLE JA_CMD_POWEROFF JA_CMD_POWEROFF_IMMED JA_CMD_HALT JA_CMD_HALT_IMMED \
 	JA_CMD_REBOOT JA_CMD_REBOOT_IMMED JA_CMD_HIBERNATE JA_CMD_HIBERNATE_IMMED \
 	JA_CMD_SUSPEND JA_CMD_SUSPEND_IMMED
 

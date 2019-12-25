@@ -29,13 +29,13 @@
 
 # send message
 
-_sndmsg_options="JA_USRL pr@
+_sndmsg_options="JA_USRS pr@
 JA_MSG rp"
 
 _sndmsg() {
 	local usr
 
-	for usr in $(tr -s ',' ' ' <<< "${JA_USRL}"); do
+	for usr in $(tr -s ',' ' ' <<< "${JA_USRS}"); do
 		_pipe_write "_msg_oneusr:${JA_USR}:${usr}:${JA_MSG}"
 		_usr_notify "Sending message '${JA_MSG}' to user '${usr}'."
 	done

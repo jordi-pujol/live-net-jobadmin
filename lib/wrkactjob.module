@@ -31,11 +31,11 @@
 
 . "${JA_LIB}libparms"
 
-_wrkactjob_options="JA_SBSDL pr@
-JA_JOBQL pr@
-JA_JOB_STSL pr@
-JA_SBSTYPL pr@
-JA_USRL pr@
+_wrkactjob_options="JA_SBSDS pr@
+JA_JOBQS pr@
+JA_JOB_STSS pr@
+JA_SBSTYPS pr@
+JA_USRS pr@
 JA_SEQ p"
 
 _wrkactjob_chgview() {
@@ -82,8 +82,8 @@ _wrkactjob_jobq_line() {
 	local sbsd="${2}"
 	local jobq_actjobs jobq_maxjobs jobq_hld
 
-	[ "${JA_JOBQL}" = "all" ] || \
-		grep -qswe "${jobq}" <<< "${JA_JOBQL}" || \
+	[ "${JA_JOBQS}" = "all" ] || \
+		grep -qswe "${jobq}" <<< "${JA_JOBQS}" || \
 		return 0
 	jobq_hld="$(_read_option "JA_HLD" "${JA_SPOOL}${jobq}.jobq.attrs")" || \
 		jobq_hld="RLS"
@@ -225,12 +225,12 @@ _wrkactjob_refresh() {
 
 	sbsds="$(_sbsds_selected)"
 	if [ "${JA_SEQ}" = "1" ]; then
-		list_jobs="$(_find_jobs "${JA_USRL}" "${JA_SBSDL}" \
-			"${JA_JOB_STSL}" "${JA_JOBQL}" "${JA_SBSTYPL}" | \
+		list_jobs="$(_find_jobs "${JA_USRS}" "${JA_SBSDS}" \
+			"${JA_JOB_STSS}" "${JA_JOBQS}" "${JA_SBSTYPS}" | \
 			sort -t $'\t' -k 6,6 -k 7,7 -k 5n,5 -k 9nr,9 -k 1n,1)"
 	else
-		list_jobs="$(_find_jobs "${JA_USRL}" "${JA_SBSDL}" \
-			"${JA_JOB_STSL}" "${JA_JOBQL}" "${JA_SBSTYPL}" | \
+		list_jobs="$(_find_jobs "${JA_USRS}" "${JA_SBSDS}" \
+			"${JA_JOB_STSS}" "${JA_JOBQS}" "${JA_SBSTYPS}" | \
 			sort -t $'\t' -k 6,6 -k 5n,5 -k 9nr,9 -k 1n,1)"
 	fi
 	subfile="$(_wrkactjob_jobs)"
@@ -260,20 +260,19 @@ _wrkactjob_lineOK() {
 		_cmd_abv_dsc "${m}" "JOB,JOBQ,OUTQ,SYS" || \
 			return 1
 		if echo "${JA_CMD_OBJ}" | grep -qswe "JOB"; then
+			local job="${sfl_line/[[:blank:]]*/}"
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_JOB=$(cut -f 1 -s -d '.' <<< "${sfl_line}")" \
-			"JA_USR=$(cut -f 2 -s -d '.' <<< "${sfl_line}")" \
-			"JA_PID=$(cut -f 3 -s -d '.' <<< "${sfl_line}")"
+			"JA_JOB=$(cut -f 1 -s -d '.' <<< "${job}")" \
+			"JA_USR=$(cut -f 2 -s -d '.' <<< "${job}")" \
+			"JA_PID=$(cut -f 3 -s -d '.' <<< "${job}")"
 		elif echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_JOBQ=$(awk -v i="${i}" \
-			'NR == i {print $7}' <<< "${subfile}" | \
+			"JA_JOBQ=$(awk '{print $7; exit}' <<< "${sfl_line}" | \
 			cut -f 1 -d '/')"
 		elif echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
 			_options_reuse "${JA_CMD_CMD}" \
 			"JA_OUTQ=$(_read_option "JA_OUTQ" \
-			"$(awk -v i="${i}" \
-			'NR == i {print $NF}' <<< "${subfile}")")"
+			"$(awk '{print $NF}' <<< "${sfl_line}")")"
 		fi
 		;;
 	esac

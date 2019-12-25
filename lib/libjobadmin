@@ -749,8 +749,8 @@ _find_splfs() {
 }
 
 _sbsds_selected() {
-	local sbsdl="${1:-"${JA_SBSDL}"}" sbstypl="${2:-"${JA_SBSTYPL}"}"
-	local jobql="${3:-"${JA_JOBQL}"}"
+	local sbsdl="${1:-"${JA_SBSDS}"}" sbstypl="${2:-"${JA_SBSTYPS}"}"
+	local jobql="${3:-"${JA_JOBQS}"}"
 	local sbsd
 
 	if [ "${sbsdl}" = "all" ] && [ "${jobql}" != "all" ]; then
@@ -858,7 +858,7 @@ _find_jobs() {
 			fi
 			;;
 		ACT|END)
-			job_pids="$(_read_option "JA_PIDS" "${attrs}")" && \
+			job_pids="$(_read_option "JA_EXECS" "${attrs}")" && \
 			job_pid="$(awk '{print $NF}' <<< "${job_pids}" | \
 				cut -f 1 -d ":")" && \
 			timejob="$(_read_option "JA_DATESTR" \
@@ -872,7 +872,7 @@ _find_jobs() {
 			fi
 			;;
 		OUTQ)
-			job_pids="$(_read_option "JA_PIDS" "${attrs}")" && \
+			job_pids="$(_read_option "JA_EXECS" "${attrs}")" && \
 			job_pid="$(awk '{print $NF}' <<< "${job_pids}" | \
 				cut -f 1 -d ":")" && \
 			timejob="$(_read_option "JA_DATEEND" \
@@ -983,7 +983,7 @@ _job_exist_exec() {
 	job_dir="${usr_dir}${job}.job/"
 	[ -d "${job_dir}" ] || \
 		return 1
-	if ! job_pids="$(_read_option "JA_PIDS" "${job_dir}job.attrs")"; then
+	if ! job_pids="$(_read_option "JA_EXECS" "${job_dir}job.attrs")"; then
 		_usr_notify "Warning: No executions exist for '${job}.${usr}'."
 		return 1
 	fi

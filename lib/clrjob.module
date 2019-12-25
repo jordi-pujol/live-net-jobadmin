@@ -37,7 +37,7 @@ Clear Job history of executions data"
 
 _clrjob_options="JA_JOB pr@
 JA_USR pr@
-JA_PIDL pr@
+JA_PIDS pr@
 JA_KEEP pr@"
 
 _clrjob_by_pid() {
@@ -58,7 +58,7 @@ _clrjob_by_pid() {
 		if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]+[[:blank:]]*| \
 		{s|||p;q0};q1" <<< "${job_pids}")"; then
 			job_pids="${ja_pids}"
-			_set_option "${attrs}" "JA_PIDS" "${ja_pids}"
+			_set_option "${attrs}" "JA_EXECS" "${ja_pids}"
 		fi
 	else
 		rc=1
@@ -80,7 +80,7 @@ _clrjob() {
 		return 1
 	fi
 	rc=0
-	if [ "${JA_PIDL}" = "all" ]; then
+	if [ "${JA_PIDS}" = "all" ]; then
 		( set +o noglob 
 		while IFS= read -r job_cmd; do
 			rm -f "${job_cmd%".cmd"}"[.-]*
@@ -89,10 +89,10 @@ _clrjob() {
 
 		attrs="${JA_JOB_DIR}job.attrs"
 		if [ ${JA_KEEP} = 0 ]; then
-			_set_option "${attrs}" "JA_PIDS" ""
+			_set_option "${attrs}" "JA_EXECS" ""
 		else
-			_set_option "${attrs}" "JA_PIDS" \
-				"$(_read_option "JA_PIDS" "${attrs}" | \
+			_set_option "${attrs}" "JA_EXECS" \
+				"$(_read_option "JA_EXECS" "${attrs}" | \
 				awk -v ja_keep=${JA_KEEP} \
 				'{for (i=1; i <= NF-ja_keep; i++) $i=""
 				gsub(/^[[:blank:]]+|[[:blank:]]+$/, "")
@@ -103,8 +103,8 @@ _clrjob() {
 		return 1
 	else
 		attrs="${JA_JOB_DIR}job.attrs"
-		if job_pids="$(_read_option "JA_PIDS" "${attrs}")"; then
-			for job_pid in $(tr -s ',' ' ' <<< "${JA_PIDL}"); do
+		if job_pids="$(_read_option "JA_EXECS" "${attrs}")"; then
+			for job_pid in $(tr -s ',' ' ' <<< "${JA_PIDS}"); do
 				_clrjob_by_pid "${job_pid}"
 			done
 		else

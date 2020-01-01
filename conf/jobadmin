@@ -105,12 +105,11 @@ if term="$(readlink -f "$(which x-terminal-emulator)")"; then
 fi
 readonly JA_XTERM_TABS JA_KEY_NEWTAB JA_KONSOLE JA_KONSOLE_NOCLOSE
 
-# when sending a message to the X screen via libnotify
-# send also the message to the active xterm
+# send a message to the X screen via libnotify
+# and send also the message to an active tty
 # values: Yes or blank
-#JA_MSG_XTERM="Yes"
-JA_MSG_XTERM=""
-readonly JA_MSG_XTERM
+#JA_MSG_XTERM="X,tty"
+JA_MSG_XTERM="X,tty"
 
 if [ -d "/run/systemd/system" ]; then
 	JA_CGEXEC="systemd-run --slice=@CGRP --uid=@USR --unit=@JOB_@USR \
@@ -129,10 +128,11 @@ fi
 readonly JA_CGEXEC JA_CGEXEC_INTER
 
 # Power management
-# Check cpu time, disk read/write and network traffic
+# Check cpu time, disk read/write, network traffic and X change
 #    before starting execution of a controlled pwrdwnsys command.
-#JA_IDLE="cpu,disk,network"
-JA_IDLE=""
+#JA_IDLE="cpu,disk,network,X"
+JA_IDLE="cpu,disk,network,X"
+
 # commands are executed by the jobadmin daemon, user root
 # KDE4, ConsoleKit, UPower
 # JA_CMD_POWEROFF='dbus-send --system --print-reply --dest="org.freedesktop.ConsoleKit" /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Stop'
@@ -155,10 +155,10 @@ JA_IDLE=""
 #   echo platform > /sys/power/disk; echo disk > /sys/power/state
 
 if [ -d "/run/systemd/system" ]; then
-	#JA_HIBERNATE="hibernate"
 	JA_HIBERNATE="hybrid-sleep"
-	#JA_SUSPEND="suspend"
-	JA_SUSPEND="hybrid-sleep"
+	#JA_HIBERNATE="hibernate"
+	#JA_SUSPEND="hybrid-sleep"
+	JA_SUSPEND="suspend"
 
 	JA_CMD_POWEROFF='systemctl poweroff'
 	JA_CMD_POWEROFF_IMMED='systemctl poweroff --ignore-inhibitors'
@@ -238,14 +238,6 @@ fi
 readonly JA_IDLE JA_CMD_POWEROFF JA_CMD_POWEROFF_IMMED JA_CMD_HALT JA_CMD_HALT_IMMED \
 	JA_CMD_REBOOT JA_CMD_REBOOT_IMMED JA_CMD_HIBERNATE JA_CMD_HIBERNATE_IMMED \
 	JA_CMD_SUSPEND JA_CMD_SUSPEND_IMMED
-
-# to poweroff detect active X screensaver, returns true or false
-# qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SetActive true
-#JA_CMD_XSAVER='dbus-send --session --dest=org.freedesktop.ScreenSaver --type=method_call --print-reply /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
-#JA_CMD_XSAVER='qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
-JA_CMD_XSAVER='qdbus org.kde.krunner /ScreenSaver org.freedesktop.ScreenSaver.GetActive'
-
-readonly JA_CMD_XSAVER
 
 # cups server
 JA_CUPS_SERVER=""

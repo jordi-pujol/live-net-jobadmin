@@ -142,10 +142,10 @@ _create_usr_dir() {
 
 _enable_daemon_debug() {
 	bash_xtracefd=2
-	JA_DEBUG="${JA_DEBUG_DAEMON:-}"
+	JA_DEBUG="${1:-"${JA_DEBUG_DAEMON:-}"}"
 	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
 	if [ -n "${JA_DEBUG:-}" ]; then
-		exec {bash_xtracefd}>> "${JA_LOG}.xtrace"
+		exec {bash_xtracefd}>> "${2:-"${JA_LOG}.xtrace"}"
 		BASH_XTRACEFD=${bash_xtracefd}
 		set -x
 	fi
@@ -195,6 +195,7 @@ _jobadmin_msg_usr() {
 	urgency="$(cut -f 1 -d ':' <<< "${3}")"
 	reuse_ID="${4:-}"
 	notifyID="${5:-}"
+	terminals=()
 
 	if grep -qsExe "[[:alpha:]]+|0" <<< "${notifyID}"; then
 		printf "%s\n" "${notifyID}"
@@ -214,7 +215,6 @@ _jobadmin_msg_usr() {
 	timeout="${timeout:-"${JA_NOTIFY_TIMEOUT}"}"
 	[ -n "${notifyID}" ] || \
 		_usr_notify "${msg}" "${usr}" "y"
-	terminals=()
 	if [ -d "/run/systemd/system" ]; then
 		while read -r session uid usr1 seat; do
 			[ "${usr}" = "${usr1}" ] || \
@@ -310,6 +310,12 @@ _jobadmin_msg_job() {
 	_jobadmin_msg_usrs "${usr} $(_read_option "JA_SUDO_USR" "${attrs}")" \
 		"${msg}" "${urgency}"
 	:
+}
+
+_subprocess_active() {
+	local pidfile="${1}"
+	[ -s "${JA_TMP}${pidfile}" ] && \
+	kill -s 0 "$(cat "${JA_TMP}${pidfile}")" > /dev/null 2>&1
 }
 
 _reload_description() {
@@ -613,17 +619,11 @@ _jobadmin_exec() {
 	job_pid="${$}"
 
 	# enable debug
-	bash_xtracefd=2
 	timestart="$(_UTCseconds)"
 	attrs="${JA_JOB_DIR}job.attrs"
-	JA_DEBUG="${JA_DEBUG_EXEC:-"$(_read_option "JA_DBG" "${attrs}" || :)"}"
-	export PS4='+\t ${BASH_SOURCE}:${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
-	if [ -n "${JA_DEBUG:-}" ]; then
-		splf_xtrace="${JA_JOB_DIR}job-${job_pid}-xtrace"
-		exec {bash_xtracefd}>> "${splf_xtrace}.splf"
-		BASH_XTRACEFD="${bash_xtracefd}"
-		set -x
-	fi
+	_enable_daemon_debug \
+		"${JA_DEBUG_EXEC:-"$(_read_option "JA_DBG" "${attrs}" || :)"}" \
+		"${JA_JOB_DIR}job-${job_pid}-xtrace"
 
 	trap '_pipe_write "_jobadmin"' EXIT
 
@@ -804,26 +804,17 @@ _jobadmin_msg_oneusr() {
 }
 
 _systemd_inhibited() {
-	! grep -qswe 'IMMED' "${JA_TMP}pwrdwnsys.now" && \
+	! grep -qswe 'IMMED' "${JA_PWROPTION}" && \
 		[ -d "/run/systemd/system" ] || \
 		return 1
-	systemd-inhibit --list --mode=block | \
-		awk '! $1 {l=""}
-		$1 == "Who:" {l=$0}
-		$1 == "What:" && $2 ~ "shutdown|sleep|idle" && l {rc=-1; exit}
-		END{exit rc+1}'
+	systemd-inhibit --list --mode=block 2>&1 | \
+		grep -sF "shutdown|sleep|idle" >&2
 }
 
 _inhibit_watchdog() {
-	local fd0
-	( if ! flock --exclusive --nonblock ${fd0}; then
-		return 0
-	else
-		while _systemd_inhibited; do
-			sleep 1
-		done
-	fi
-	) {fd0}< "$(_flock_lckfile "${JA_TMP}pwrdwnsys-watchdog.txt")"
+	while _systemd_inhibited; do
+		sleep 1
+	done
 	_pipe_daemon_write "jobadmin"
 	:
 }
@@ -837,7 +828,7 @@ _jobadmin_notify_loggedinusrs() {
 	shift
 	msg="${@}"
 
-	for usr in $(users); do
+	for usr in $(_system_users); do
 		notifyID="$(awk -v usr="${usr}" '$1 == usr {print $2; exit}' \
 			"${JA_TMP}pwrdwnsys.notifyIDs")"
 		[ "${notifyID}" != "0" ] || \
@@ -885,61 +876,61 @@ _jobadmin_resume_offset() {
 
 _jobadmin_pwroff() {
 	local attrs pwr_restart \
-		delay urgency immed fd0 \
-		cpu disk network
+		delay urgency immed fd0
 
-	attrs="${JA_TMP}pwrdwnsys.attrs"
-	pwr_restart="$(_read_option "JA_RESTART" "${attrs}")" || \
+	_enable_daemon_debug "" "${JA_LOG}-pwroff.xtrace"
+
+	pwr_restart="$(_read_option "JA_RESTART" "${JA_PWRATTRS}")" || \
 		return 0
 
-	delay="$(_read_option "JA_DELAY" "${attrs}")" || \
+	delay="$(_read_option "JA_DELAY" "${JA_PWRATTRS}")" || \
 		delay=1
-	immed="$(grep -se "IMMED" "${JA_TMP}pwrdwnsys.now")"
-	if flock --exclusive --timeout 1 ${fd0}; then
-		: > "${JA_TMP}pwrdwnsys.notifyIDs"
-		while [ -s "${JA_TMP}pwrdwnsys.now" ] && \
-		! _systemd_inhibited && \
-		_jobadmin_status; do
-			[ ${delay} -gt 0 ] && \
-				urgency="critical:2000" || \
-				urgency=":2000"
-			_jobadmin_notify_loggedinusrs "${urgency}" \
-				"From jobadmin daemon:" \
-				"${NL}System will ${pwr_restart} in ${delay} seconds"
-			[ $((delay--)) -gt 0 ] || \
-				break
-			sleep 1
-		done
-		if [ ${delay} -gt 0 ]; then
-			_set_option "${attrs}" "JA_PID" ""
-			_set_option "${attrs}" "JA_NOTIFIED" ""
-
-			if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
-				_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
-					"${NL}Found active jobs, deferring System shutdown"
-				_jobadmin_allusrs_msg "From jobadmin daemon:" \
-					"${NL}Found active jobs, deferring System shutdown"
-				_pipe_daemon_write "_inhibit_watchdog" &
-			else
-				_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
-					"${NL}Power down system has been cancelled"
-				_jobadmin_allusrs_msg "From jobadmin daemon:" \
-					"${NL}Power down system has been cancelled"
-			fi
-			return 0
-		fi
-
-		_jobadmin_notify_loggedinusrs ":1" \
+	immed="$(grep -se "IMMED" "${JA_PWROPTION}" || :)"
+	: > "${JA_TMP}pwrdwnsys.notifyIDs"
+	while [ -s "${JA_PWROPTION}" ] && \
+	! _systemd_inhibited && \
+	_jobadmin_status; do
+		[ ${delay} -gt 0 ] && \
+			urgency="critical:2000" || \
+			urgency=":2000"
+		_jobadmin_notify_loggedinusrs "${urgency}" \
 			"From jobadmin daemon:" \
-			"${NL}Executing system ${pwr_restart}"
-		_jobadmin_allusrs_msg "From jobadmin daemon:" \
-			"${NL}Executing system ${pwr_restart}"
-	else
-		echo "flock ${JA_TMP}pwrdwnsys.notifyIDs error code: $?"
+			"${NL}System will ${pwr_restart} in ${delay} seconds"
+		if _subprocess_active "pwrdwnsys.watch_idle.pid"; then
+			[ -s "${JA_TMP}pwrdwnsys.idle" ] || \
+				break
+		fi
+		[ $((delay--)) -gt 0 ] || \
+			break
+		sleep 1
+	done
+	if [ ${delay} -gt 0 ]; then
+		_set_option "${JA_PWRATTRS}" "JA_PID" ""
+
+		if [ -s "${JA_PWROPTION}" ]; then
+			_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
+				"${NL}Found active jobs, deferring System shutdown"
+			_jobadmin_allusrs_msg "From jobadmin daemon:" \
+				"${NL}Found active jobs, deferring System shutdown"
+			_pipe_daemon_write "_inhibit_watchdog" &
+		else
+			_jobadmin_notify_loggedinusrs "" "From jobadmin daemon:" \
+				"${NL}Power down system has been cancelled"
+			_jobadmin_allusrs_msg "From jobadmin daemon:" \
+				"${NL}Power down system has been cancelled"
+		fi
 		return 0
-	fi {fd0}< "$(_flock_lckfile "${JA_TMP}pwrdwnsys.notifyIDs")"
+	fi
+
+	_jobadmin_notify_loggedinusrs ":1" \
+		"From jobadmin daemon:" \
+		"${NL}Executing system ${pwr_restart}"
+	_jobadmin_allusrs_msg "From jobadmin daemon:" \
+		"${NL}Executing system ${pwr_restart}"
 
 	truncate -s 0 $(_expand_glob "${JA_TMP}pwrdwnsys.*")
+	[ -n "$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" ] || \
+		truncate -s 0 "${JA_PWRATTRS}"
 
 	exec > "${JA_TMP}pwrdwnsys.sh"
 	printf '%s\n' "#!/bin/sh"
@@ -1084,7 +1075,8 @@ _jobadmin_stop() {
 	# Daemon exits
 	trap - EXIT
 	kill -TERM $(_ps_children) > /dev/null 2>&1
-	rm -f "${JA_PIDFILE}" "${JA_PIPE}" "${JA_PIPE_WTR}" "${JA_PIPE_DAEMON}"
+	rm -f "${JA_PIDFILE}" "${JA_PIPE}" "${JA_PIPE_WTR}" "${JA_PIPE_DAEMON}" \
+		 "${JA_PIPE_MONITOR}"
 	wait > /dev/null 2>&1 || :
 	_log "Daemon stopped."
 	exit 0
@@ -1728,16 +1720,114 @@ _jobadmin_wtrs_check() {
 	:
 }
 
-_jobadmin_system_idle() {
-	if grep -qswie "cpu" <<< "${JA_IDLE}" ]; then
-		:
-	fi
-	if grep -qswie "disk" <<< "${JA_IDLE}" ]; then
-		:
-	fi
-	if grep -qswie "network" <<< "${JA_IDLE}" ]; then
-		:
-	fi
+_jobadmin_watch_idle() {
+	local interval=0 doing_some_work \
+		Wt=0 It=0 \
+		Dr=0 Dw=0 \
+		Nr=0 Nt=0
+
+	trap - EXIT INT
+	: > "${JA_TMP}pwrdwnsys.idle"
+	_enable_daemon_debug "" "${JA_LOG}-watch_idle.xtrace"
+
+	while [ -s "${JA_PWROPTION}" ]; do
+		doing_some_work=""
+		if [ ${JA_CPU_IDLE:-0} -gt 0 ] && \
+		grep -qswiF "cpu" <<< "${JA_IDLE}" && \
+		read -r cpu usr nic sys idle iowait irq softirq steal rest \
+		< /proc/stat; then
+			working_time=$((usr+nic+sys+irq+softirq+steal))
+			idle_time=$((idle+iowait))
+			if [ ${interval} -gt 0 ]; then
+				wt=$((working_time-Wt))
+				it=$((idle_time-It))
+				ipc=$((it*100/(wt+it)))
+				#echo "wt=$wt it=$it ipc=$ipc" >&2
+				[ ${ipc} -ge ${JA_CPU_IDLE} ] || \
+					doing_some_work="y"
+			fi
+			Wt=${working_time}
+			It=${idle_time}
+		fi
+		if grep -qswiF "disk" <<< "${JA_IDLE}"; then
+			local dr=0 dw=0
+			for disk in $(basename -a $(df | awk 'NR > 1 {print $1}') | sort -u); do
+				if [ -e "/sys/class/block/${disk}/stat" ] && \
+				read -r readb readm reads readt writeb rest \
+				< "/sys/class/block/${disk}/stat"; then
+					dr=$((dr+readb))
+					dw=$((dw+writeb))
+				fi
+			done
+			if [ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
+				[ $(((dr+dw-Dr-Dw)/interval)) -le 32 ] || \
+					doing_some_work="y"
+			fi
+			Dr=${dr}
+			Dw=${dw}
+		fi
+		if grep -qswiF "network" <<< "${JA_IDLE}"; then
+			local nr=0 nt=0
+			for iface in $(_expand_glob "/sys/class/net/*"); do
+				if [ -e "${iface}/statistics/rx_bytes" ] && \
+				rx_bytes="$(cat "${iface}/statistics/rx_bytes" 2> /dev/null)" && \
+				tx_bytes="$(cat "${iface}/statistics/tx_bytes" 2> /dev/null)"; then
+					nr=$((nr+rx_bytes))
+					nt=$((nt+tx_bytes))
+				fi
+			done
+			if [ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
+				[ $(((nr+nt-Nr-Nt)/interval)) -le 256 ] || \
+					doing_some_work="y"
+			fi
+			Nr=${nr}
+			Nt=${nt}
+		fi
+		if grep -qswiF "X" <<< "${JA_IDLE}" && \
+		[ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
+			unset terminal
+			while read -r terminal; do
+				usr="$(cut -f 1 -s -d ' ' <<< "${terminal}")"
+				terminal="$(cut -f 2 -s -d ' ' <<< "${terminal}" | \
+					sed -e '/[()]/s///g')"
+				session_managers="$(basename -a "x-session-manager" \
+					$(update-alternatives --list x-session-manager) | \
+					_comma_separated "|")"
+				if pid_sess="$(ps --no-headers \
+				-u "${usr}" -o pid,cmd | \
+				awk -v sm="${session_managers}" \
+				'$2 ~ sm {print $1; rc=-1; exit}
+				END{exit rc+1}')" && \
+				DBUS_SESSION_BUS_ADDRESS="$(grep -z DBUS_SESSION_BUS_ADDRESS \
+				/proc/${pid_sess}/environ | tr -d '\0')"; then
+					export DISPLAY="${terminal}"
+					export "${DBUS_SESSION_BUS_ADDRESS}"
+					if timeslice="$(_sudo "${usr}" xprintidle)"; then
+						[ ${timeslice} -gt 20000 ] || \
+							doing_some_work="y"
+					fi
+				fi
+				unset terminal
+			done < <(who --writable | \
+				awk '$2 ~ "[+-]" {print $1 " " $NF}' 2> /dev/null | \
+				sort --unique)
+		fi
+
+		idle="$(cat "${JA_TMP}pwrdwnsys.idle")"
+		if [ -n "${doing_some_work}" -o ${interval} -eq 0 ]; then
+			[ -z "${idle}" ] || \
+				: > "${JA_TMP}pwrdwnsys.idle"
+			[ ${interval} -ge 5 ] || \
+				[ $((interval++)) ]
+		elif [ -z "${idle}" ]; then
+			echo "idle" > "${JA_TMP}pwrdwnsys.idle"
+			_pipe_daemon_write "_jobadmin"
+			! _subprocess_active "pwrdwnsys.pid" || \
+				interval=1
+		fi
+		sleep ${interval} &
+		wait -f ${!} || :
+	done
 }
 
 # run jobs that are waiting in non-interactive job queues
@@ -1746,19 +1836,32 @@ _jobadmin_monitor() {
 		usr delay pwr_option pwr_restart urgency \
 		sys_active_jobs terminal ent home idle_cpu
 
-	if [ -s "${JA_TMP}pwrdwnsys.now" ]; then
-		# don't start new jobs when a pwrdwnsys is in process
-		if pid="$(_read_option "JA_PID" "${vars_pwrdwnsys}")" && \
-		kill -0 "${pid}" > /dev/null 2>&1; then
-			return 0
+	_enable_daemon_debug "" "${JA_LOG}-monitor.xtrace"
+
+	echo "init" > "${JA_PIPE_MONITOR}"
+	while :; do
+		if [ ! -s "${JA_PIPE_MONITOR}" ]; then
+			inotifywait -e modify --timeout 60 "${JA_PIPE_MONITOR}" > /dev/null 2>&1 &
+			wait -f "${!}" || :
+		fi
+		: > "${JA_PIPE_MONITOR}"
+
+		if [ -n "$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" ] && \
+		[ ! -s "${JA_PWROPTION}" ] && \
+		! _subprocess_active "pwrdwnsys.pid"; then
+			_read_option "JA_OPTION" "${JA_PWRATTRS}" > "${JA_PWROPTION}"
+			_set_option "${JA_PWRATTRS}" "JA_NOTIFIED"
+			_set_option "${JA_PWRATTRS}" "JA_PID"
 		fi
 
-		if ! dummy="$(_read_option "JA_NOTIFIED" "${vars_pwrdwnsys}")"; then
-			_set_option "${vars_pwrdwnsys}" "JA_NOTIFIED" "1"
-			if usr="$(_read_option "JA_USR" "${vars_pwrdwnsys}")" && \
-			delay="$(_read_option "JA_DELAY" "${vars_pwrdwnsys}")" && \
-			pwr_option="$(_read_option "JA_OPTION" "${vars_pwrdwnsys}")" && \
-			pwr_restart="$(_read_option "JA_RESTART" "${vars_pwrdwnsys}")"; then
+		if [ -s "${JA_PWROPTION}" ] && \
+		! dummy="$(_read_option "JA_NOTIFIED" "${JA_PWRATTRS}")"; then
+			_set_option "${JA_PWRATTRS}" "JA_NOTIFIED" "1"
+
+			if usr="$(_read_option "JA_USR" "${JA_PWRATTRS}")" && \
+			delay="$(_read_option "JA_DELAY" "${JA_PWRATTRS}")" && \
+			pwr_option="$(_read_option "JA_OPTION" "${JA_PWRATTRS}")" && \
+			pwr_restart="$(_read_option "JA_RESTART" "${JA_PWRATTRS}")"; then
 				_systemd_inhibited && \
 					urgency="" || \
 					urgency=":2000"
@@ -1767,112 +1870,52 @@ _jobadmin_monitor() {
 					"${delay} seconds delayed")" \
 					"${urgency}"
 			fi
-		fi
-	fi
-
-	# find pending JOBQ jobs and submit processing
-	while _jobadmin_jobs_check; do
-		sleep 1
-	done
-
-	[ -z "${JA_PROCESS_WTR:-}" ] || \
-		_jobadmin_wtrs_check
-
-	# compute number of active jobs in non-control subsystems
-	grep -qswe 'IMMED' "${JA_TMP}pwrdwnsys.now" && \
-		sys_active_jobs=0 || \
-		sys_active_jobs="$(awk '$5 != "1" {c++} END{print c+0}' "${JA_TMP}jobs_active.lst")"
-
-	if [ -s "${JA_TMP}pwrdwnsys.now" ] && \
-	[ ${sys_active_jobs} -eq 0 ]; then
-		if sleep 1 && \
-		_systemd_inhibited; then
-			_pipe_daemon_write "_inhibit_watchdog" &
-			return 0
-		fi
-		# Option JA_XSAVER, only for KDE
-		: || if dummy="$(_read_option "JA_XSAVER" "${vars_pwrdwnsys}")"; then
-			while read -r usr terminal; do
-				ent="$(getent passwd "${usr}")" || continue
-				home="$(awk 'BEGIN{FS=":"}
-					{h=$6}
-					END{print h; exit system("test -d \""h"\"")}' \
-					<<< "${ent}")" || \
-					continue
-				if grep -qsxe 'Enabled=true' "${home}/.kde/share/config/kscreensaverrc"; then
-					DISPLAY="${terminal}"
-					if [ "$(_sudo "${usr}" ${JA_CMD_XSAVER})" = "false" ]; then
-						sys_active_jobs=$((sys_active_jobs+1))
-						_log "pwrdwnsys: user '${usr}' is active in" \
-							"display '${terminal}' ."
-					fi
-				fi
-			done < <(who --writable | \
-				awk '$2 != "-" && $3 ~ "^:" {print $1 OFS $3}' | \
-				sort -k 2,2)
-			[ ${sys_active_jobs} -eq 0 ] || \
-				return 0
-		fi
-
-		# the system is idle?
-		_jobadmin_system_idle || \
-			return 0
-		if [ ${JA_CPU_IDLE:-0} -gt 0 ]; then
-			# the method of computing idle cpu time not shows active processes
-			# on modern computers,
-			# CPU is too much powerful and light processes consume almost nothing
-			#idle_cpu="$(top -bn3 | grep "Cpu(s)" | tail -n 1 | \
-				#sed -nre "\|.*,[[:blank:]]+([0-9]+)[,.][0-9]* id.*| s//\1/p")"
-			idle_cpu="$(vmstat 1 4 | awk 'NR > 3 {n++; m=m+$(NF-2)} END{print int(m/n)}')"
-			if [ ${idle_cpu} -lt ${JA_CPU_IDLE} ]; then
-				_log "pwrdwnsys: vmstat %idle cpu" \
-					"'${idle_cpu}' < '${JA_CPU_IDLE}'."
-				return 0
+			# check that the system is idle
+			if [ -n "${JA_IDLE}" ] && \
+			grep -qswF 'CNTRLD' "${JA_PWROPTION}"; then
+				_pipe_daemon_write "_watch_idle" &
+				sleep 1
 			fi
 		fi
 
-		_jobadmin_pwroff &
-		_set_option "${vars_pwrdwnsys}" "JA_PID" "${!}"
-	fi
-	:
-}
-
-_jobadmin_pipe_daemon_read() {
-	local command fd1
-	local vars_pwrdwnsys
-	vars_pwrdwnsys="${JA_TMP}pwrdwnsys.attrs"
-	# loop forever
-	while :; do
-		( if ! flock --exclusive ${fd1}; then
-			_log "Error: '_jobadmin_monitor' is locked." # should never happen
-		else
-			_jobadmin_monitor
+		# don't start new jobs when a pwrdwnsys is in process
+		if _subprocess_active "pwrdwnsys.pid" && \
+		! grep -qswe 'CNTRLD' "${JA_PWROPTION}"; then
+			continue
 		fi
-		) {fd1}< "$(_flock_lckfile "${JA_TMP}monitor")"
 
-		command="$(_pipe_pull "${JA_PIPE_DAEMON}")" && \
-			[ -n "${command}" ] || continue
-		case "${command}" in
-		_jobadmin_stop)
-			kill -TERM "$(cat "${JA_PIDFILE}")"
-			;;
-		_inhibit_watchdog)
-			_inhibit_watchdog &
-			;;
-		_strsbs:*) # don't fork this; it modifies the config files
-			_jobadmin_strsbs "$(cut -f 2 -s -d ':' <<< "${command}")" \
-				"$(cut -f 3- -s -d ':' <<< "${command}")"
-			;;
-		_jobadmin) # normal message, new interval
-			:
-			;;
-		*)
-			_log "Invalid command received from the daemon pipe: ${command}"
-			;;
-		esac
-		_jobadmin_status || \
-			return 0
+		if ! grep -qswe 'ASAP|IMMED' "${JA_PWROPTION}"; then
+			# find pending JOBQ jobs and start processing
+			while _jobadmin_jobs_check; do
+				sleep 1
+			done
+			[ -z "${JA_PROCESS_WTR:-}" ] || \
+				_jobadmin_wtrs_check
+		fi
+
+		if _subprocess_active "pwrdwnsys.pid"; then
+			continue
+		fi
+
+		# compute number of active jobs in non-control subsystems
+		grep -qswF 'IMMED' "${JA_PWROPTION}" && \
+			sys_active_jobs=0 || \
+			sys_active_jobs="$(awk '$5 != "1" {c++} END{print c+0}' "${JA_TMP}jobs_active.lst")"
+
+		if [ -s "${JA_PWROPTION}" ] && \
+		( ! _subprocess_active "pwrdwnsys.watch_idle.pid" || \
+		[ -s "${JA_TMP}pwrdwnsys.idle" ] ) && \
+		[ ${sys_active_jobs} -eq 0 ]; then
+			sleep 1
+			if ! grep -qswF 'IMMED' "${JA_PWROPTION}" && \
+			_systemd_inhibited; then
+				_pipe_daemon_write "_inhibit_watchdog" &
+				continue
+			fi
+			_pipe_daemon_write "_pwroff" &
+		fi
 	done
+	:
 }
 
 _jobadmin_daemon() {
@@ -1908,6 +1951,12 @@ _jobadmin_daemon() {
 		chmod u=rw,g=rw,o= "${JA_PIPE_DAEMON}"
 	fi
 
+	if [ ! -e "${JA_PIPE_MONITOR}" ]; then
+		touch "${JA_PIPE_MONITOR}"
+		chmod u=rw,g=rw,o= "${JA_PIPE_MONITOR}"
+	fi
+
+
 	if [ ! -f "${JA_TMP}notifier.splf" ]; then
 		touch "${JA_TMP}notifier.splf"
 		chmod a=rw "${JA_TMP}notifier.splf"
@@ -1920,14 +1969,14 @@ _jobadmin_daemon() {
 	[ -z "${JA_PROCESS_WTR:-}" ] || \
 		_jobadmin_wtrs_init "Yes"
 
-	[ -f "${JA_TMP}pwrdwnsys.attrs" ] || \
-		touch "${JA_TMP}pwrdwnsys.attrs"
-	[ -f "${JA_TMP}pwrdwnsys.now" ] || \
-		touch "${JA_TMP}pwrdwnsys.now"
+	[ -f "${JA_PWRATTRS}" ] || \
+		touch "${JA_PWRATTRS}"
+	[ -f "${JA_PWROPTION}" ] || \
+		touch "${JA_PWROPTION}"
 	setfacl --recursive --modify "group:powerdev:rw" \
-		$(_expand_glob "${JA_TMP}pwrdwnsys.*") || \
+		"${JA_PWRATTRS}" "${JA_PWROPTION}" || \
 		_log "Error: Can't set ACL's in" \
-			"device '$(df "${JA_TMP}pwrdwnsys.attrs" | \
+			"device '$(df "${JA_TMP}" | \
 		awk 'NR == 2 {print $1}')'."
 
 	# stop, signal TERM,
@@ -1949,8 +1998,49 @@ _jobadmin_daemon() {
 	# interrupt, control C
 	trap ':' INT
 
-	_jobadmin_pipe_daemon_read
-	exit 0
+	_jobadmin_monitor &
+
+	local command
+
+	# loop forever
+	while :; do
+		command="$(_pipe_pull "${JA_PIPE_DAEMON}")" && \
+			[ -n "${command}" ] || continue
+		case "${command}" in
+		_jobadmin_stop)
+			kill -TERM "$(cat "${JA_PIDFILE}")"
+			;;
+		_inhibit_watchdog)
+			if ! _subprocess_active "pwrdwnsys.watchdog.pid"; then
+				_inhibit_watchdog &
+				echo ${!} > "${JA_TMP}pwrdwnsys.watchdog.pid"
+			fi
+			;;
+		_strsbs:*) # don't fork this; it modifies the config files
+			_jobadmin_strsbs "$(cut -f 2 -s -d ':' <<< "${command}")" \
+				"$(cut -f 3- -s -d ':' <<< "${command}")"
+			;;
+		_watch_idle)
+			if ! _subprocess_active "pwrdwnsys.watch_idle.pid"; then
+				_jobadmin_watch_idle &
+				echo ${!} > "${JA_TMP}pwrdwnsys.watch_idle.pid"
+			fi
+			;;
+		_pwroff)
+			if ! _subprocess_active "pwrdwnsys.pid"; then
+				_jobadmin_pwroff &
+				echo ${!} > "${JA_TMP}pwrdwnsys.pid"
+			fi
+			;;
+		_jobadmin) # normal message, new interval
+			:
+			;;
+		*)
+			_log "Invalid command received from the daemon pipe: ${command}"
+			;;
+		esac
+		echo "daemon" > "${JA_PIPE_MONITOR}"
+	done
 }
 
 # JOBCTL client

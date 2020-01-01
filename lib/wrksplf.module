@@ -181,7 +181,7 @@ _wrksplf_lineOK() {
 			return 1
 		if echo "${JA_CMD_OBJ}" | grep -qswe "WTR"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_WTR=$( cut -f 2 -d '/' <<< "${sfl_line}")"
+			"JA_WTR=$( cut -f 2 -d '/' <<< "${sfl_line/[[:blank:]]*/}")"
 		fi
 		;;
 	OUTQ/*)
@@ -189,7 +189,7 @@ _wrksplf_lineOK() {
 			return 1
 		if echo "${JA_CMD_OBJ}" | grep -qswe "OUTQ"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_OUTQ=$(cut -f 2 -d '/' <<<  "${sfl_line}" )"
+			"JA_OUTQ=$(cut -f 2 -d '/' <<< "${sfl_line/[[:blank:]]*/}")"
 		fi
 		;;
 	*)

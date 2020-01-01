@@ -1,7 +1,11 @@
 jobadmin (1.84) unstable; urgency=medium
 
+  * pwrdwnsys
+    check idle system: cpu,disk,network,X
   * wrkjobq: change single jobq parameter to work with a list of job queues.
     wrkjobq --jobq -> wrkjobq --jobql
+  * remove all xsaver functionality
+  * remove pwrdwnsys option --rlssbs
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 22 Dec 2019 14:45:38 +0100
 

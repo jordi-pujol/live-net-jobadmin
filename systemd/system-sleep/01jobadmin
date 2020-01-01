@@ -1,0 +1,11 @@
+#!/bin/bash
+
+case "${1}" in
+	post)
+		if systemctl status jobadmind.service && \
+		pwrstat="$(pwrdwnsys status)" && \
+		! grep -qsF 'persistent' <<< "${pwrstat}"; then
+			pwrdwnsys cancel
+		fi
+		;;
+esac

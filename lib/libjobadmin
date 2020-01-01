@@ -177,7 +177,7 @@ _set_option() {
 
 	filename="${1}"
 	option="${2}"
-	value="${3}"
+	value="${3:-}"
 	( if ! flock --exclusive --timeout 1 ${fd0}; then
 		_usr_notify "Error: file '${filename}' is locked."
 		return 1
@@ -263,7 +263,8 @@ _system_users() {
 	( ls -L1d ${JA_SPOOL}*.usr || test "${?}" -le "1" ) | \
 		tr -s '\n' '\000' | \
 		xargs -r0 basename -s '.usr'
-	who --writable | awk '$2 != "-" {print $1}' ) 2> /dev/null | \
+	who --writable | awk '$2 != "-" {print $1}'
+	find /dev/pts -type c -name '[1-9]' -exec stat -c %U {} \; ) 2> /dev/null | \
 	sort --unique
 }
 
@@ -569,7 +570,7 @@ _pipe_pop() {
 
 	while [ -z "${msg}" ]; do
 		if [ ! -s "${pipe}" ]; then
-			inotifywait -e modify "${pipe}" > /dev/null 2>&1 &
+			inotifywait -e modify --timeout 10 "${pipe}" > /dev/null 2>&1 &
 			wait -f "${!}" || \
 				return 1
 		fi

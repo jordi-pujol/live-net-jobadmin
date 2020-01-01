@@ -3,5 +3,5 @@
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-#@reboot	root	sleep 5 ; [ ! -s /var/tmp/jobadmin.d/pwrdwnsys.now ] || pwrdwnsys --option cancel --norlssbs
-@reboot	root	sleep 5 ; pwrdwnsys --option cancel --rlssbs
+#@reboot	root	sleep 5 ; [ ! -s /var/tmp/jobadmin.d/pwrdwnsys.option ] || pwrdwnsys --option cancel
+@reboot	root	sleep 5 ; pwrdwnsys --option cancel

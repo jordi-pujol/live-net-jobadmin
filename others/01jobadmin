@@ -2,6 +2,7 @@
 
 case "${1}" in
 	thaw|resume)
-		pwrdwnsys --option cancel --rlssbs
+		pwrdwnsys --option status 2>&1 | grep -qsF 'persistent' || \
+			pwrdwnsys --option cancel
 		;;
 esac

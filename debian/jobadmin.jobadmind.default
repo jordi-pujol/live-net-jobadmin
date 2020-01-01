@@ -33,9 +33,12 @@ JA_PIDFILE="/run/jobadmind.pid"
 JA_PIPE="${JA_RUNDIR}jobadmin.pipe"
 JA_PIPE_WTR="${JA_RUNDIR}jobadmin-wtr.pipe"
 JA_PIPE_DAEMON="${JA_RUNDIR}jobadmin-daemon.pipe"
+JA_PIPE_MONITOR="${JA_RUNDIR}jobadmin-monitor.pipe"
 JA_LOG="/var/log/jobadmind"
 
 # process spool files
+JA_PWRATTRS="${JA_SPOOL}pwrdwnsys.attrs"
+JA_PWROPTION="${JA_TMP}pwrdwnsys.option"
 #JA_PROCESS_WTR="yes"
 JA_PROCESS_WTR=""
 
@@ -48,20 +51,21 @@ JA_USR_SCDSPLFS="splfs.scd"
 JA_INTERVAL=600
 readonly JA_INTERVAL
 
-# when the percent of idle cpu is greater or equal than JA_CPU_IDLE
-# jobadmin will consider that the system is idle
-# and pwrdwnsys will be activated.
-# only integer values are allowed
-# Actually it does not work, because
-# the processors are so powerful that some processes consume less than 1% of cpu
-# valid values 0 to 100, 0 to disable check
-JA_CPU_IDLE=0
+# pwrdwnsys --option CNTRLD
+# - when the percent of idle cpu is greater or equal than JA_CPU_IDLE
+#   jobadmin will consider that the system is idle
+#   and pwrdwnsys procedure starts.
+# Only integer values are allowed. 0-99
+# set to 0 to disable
+JA_CPU_IDLE=95
 
 #JA_DISABLED="yes"
 
 readonly JA_TMP JA_SPOOL JA_RUNDIR JA_LIB
 # JA_CONF may be modified
-readonly JA_CONF_PARMDFTS JA_CONF_CMDS JA_CONF_FKEYS JA_CONF_JOBDS JA_CONF_JOBQS JA_CONF_OUTQS JA_CONF_SBSDS JA_CONF_USRS JA_CONF_WTRS JA_CONF_DLG
+readonly JA_CONF_PARMDFTS JA_CONF_CMDS JA_CONF_FKEYS JA_CONF_JOBDS \
+	JA_CONF_JOBQS JA_CONF_OUTQS JA_CONF_SBSDS JA_CONF_USRS JA_CONF_WTRS \
+	JA_CONF_DLG JA_PWRATTRS
 readonly JA_PIDFILE JA_PIPE JA_LOG
 readonly JA_DISABLED
 readonly JA_CPU_IDLE

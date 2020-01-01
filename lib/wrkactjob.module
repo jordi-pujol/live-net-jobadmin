@@ -245,7 +245,7 @@ _wrkactjob_lineOK() {
 			return 1
 		if grep -qswe "SBS" <<< "${JA_CMD_OBJ}"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_SBSD=$(cut -f 2 -s -d '/' <<< "${sfl_line}")"
+			"JA_SBSD=$(cut -f 2 -s -d '/' <<< "${sfl_line/[[:blank:]]*/}")"
 		fi
 		;;
 	JOBQ/*)
@@ -253,7 +253,7 @@ _wrkactjob_lineOK() {
 			return 1
 		if echo "${JA_CMD_OBJ}" | grep -qswe "JOBQ"; then
 			_options_reuse "${JA_CMD_CMD}" \
-			"JA_JOBQ=$(cut -f 2 -s -d '/' <<< "${sfl_line}")"
+			"JA_JOBQ=$(cut -f 2 -s -d '/' <<< "${sfl_line/[[:blank:]]*/}")"
 		fi
 		;;
 	*)

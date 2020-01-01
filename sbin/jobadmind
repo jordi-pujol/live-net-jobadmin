@@ -160,9 +160,9 @@ _jobadmin_notify_send() {
 		[ -n "${pid_sess}" ] || \
 			return 0
 	else
-		local session_managers=( x-session-manager $(basename -s '' \
-			$(update-alternatives --list x-session-manager)) )
-		IFS="|" session_managers="${session_managers[*]}"
+		local session_managers="$(basename -a "x-session-manager" \
+			$(update-alternatives --list x-session-manager) | \
+			_comma_separated "|")"
 		pid_sess="$(ps --no-headers \
 		-u "${usr}" -o pid,cmd | \
 		awk -v sm="${session_managers}" \
@@ -1803,8 +1803,10 @@ _jobadmin_watch_idle() {
 					export DISPLAY="${terminal}"
 					export "${DBUS_SESSION_BUS_ADDRESS}"
 					if timeslice="$(_sudo "${usr}" xprintidle)"; then
-						[ ${timeslice} -gt 20000 ] || \
+						if [ ${timeslice} -le 20000 ]; then
 							doing_some_work="y"
+							break
+						fi
 					fi
 				fi
 				unset terminal

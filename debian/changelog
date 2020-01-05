@@ -1,6 +1,6 @@
 jobadmin (1.85) UNRELEASED; urgency=medium
 
-  * l
+  * synchronize disks before system poweroff.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 01 Jan 2020 09:46:51 +0100
 
@@ -9,7 +9,7 @@ jobadmin (1.84) unstable; urgency=medium
   * pwrdwnsys
     check idle system: cpu,disk,network,X
   * wrkjobq: change single jobq parameter to work with a list of job queues.
-    wrkjobq --jobq -> wrkjobq --jobql
+    wrkjobq --jobq -> wrkjobq --jobqs
   * remove all xsaver functionality
   * remove pwrdwnsys option --rlssbs
 

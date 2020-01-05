@@ -874,6 +874,26 @@ _jobadmin_resume_offset() {
 	echo "${mn}" > "/sys/power/resume"
 }
 
+_jobadmin_sync() {
+	echo 3 > /proc/sys/vm/drop_caches
+	sync
+}
+
+# compute number of active jobs in non-control subsystems
+_sys_active_jobs() {
+	grep -qswF 'IMMED' "${JA_PWROPTION}" && \
+		echo 0 || \
+		awk '$5 != "1" {c++} END{print c+0}' \
+			< "${JA_TMP}jobs_active.lst"
+}
+
+_system_idle() {
+	[ -s "${JA_PWROPTION}" ] && \
+	( ! _subprocess_active "pwrdwnsys.watch_idle.pid" || \
+	[ -s "${JA_TMP}pwrdwnsys.idle" ] ) && \
+	[ $(_sys_active_jobs) -eq 0 ]
+}
+
 _jobadmin_pwroff() {
 	local attrs pwr_restart \
 		delay urgency immed fd0
@@ -887,21 +907,24 @@ _jobadmin_pwroff() {
 		delay=1
 	immed="$(grep -se "IMMED" "${JA_PWROPTION}" || :)"
 	: > "${JA_TMP}pwrdwnsys.notifyIDs"
-	while [ -s "${JA_PWROPTION}" ] && \
+	while _system_idle && \
 	! _systemd_inhibited && \
 	_jobadmin_status; do
 		[ ${delay} -gt 0 ] && \
 			urgency="critical:2000" || \
 			urgency=":2000"
-		_jobadmin_notify_loggedinusrs "${urgency}" \
-			"From jobadmin daemon:" \
-			"${NL}System will ${pwr_restart} in ${delay} seconds"
-		if _subprocess_active "pwrdwnsys.watch_idle.pid"; then
-			[ -s "${JA_TMP}pwrdwnsys.idle" ] || \
+		if [ ${delay} -le 1 ] && \
+		_subprocess_active "sync.pid"; then
+			_jobadmin_notify_loggedinusrs "${urgency}" \
+				"From jobadmin daemon:" \
+				"${NL}Waiting for disk synchronize"
+		else
+			_jobadmin_notify_loggedinusrs "${urgency}" \
+				"From jobadmin daemon:" \
+				"${NL}System will ${pwr_restart} in ${delay} seconds"
+			[ $((delay--)) -gt 0 ] || \
 				break
 		fi
-		[ $((delay--)) -gt 0 ] || \
-			break
 		sleep 1
 	done
 	if [ ${delay} -gt 0 ]; then
@@ -1753,10 +1776,12 @@ _jobadmin_watch_idle() {
 			local dr=0 dw=0
 			for disk in $(basename -a $(df | awk 'NR > 1 {print $1}') | sort -u); do
 				if [ -e "/sys/class/block/${disk}/stat" ] && \
-				read -r readb readm reads readt writeb rest \
+				read -r readb readm reads readt writeb writem writes writet inflight rest \
 				< "/sys/class/block/${disk}/stat"; then
 					dr=$((dr+readb))
 					dw=$((dw+writeb))
+					[ ${inflight} -eq 0 ] || \
+						doing_some_work="y"
 				fi
 			done
 			if [ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
@@ -1836,7 +1861,7 @@ _jobadmin_watch_idle() {
 _jobadmin_monitor() {
 	local pid \
 		usr delay pwr_option pwr_restart urgency \
-		sys_active_jobs terminal ent home idle_cpu
+		terminal ent home idle_cpu
 
 	_enable_daemon_debug "" "${JA_LOG}-monitor.xtrace"
 
@@ -1895,26 +1920,15 @@ _jobadmin_monitor() {
 				_jobadmin_wtrs_check
 		fi
 
-		if _subprocess_active "pwrdwnsys.pid"; then
-			continue
-		fi
-
-		# compute number of active jobs in non-control subsystems
-		grep -qswF 'IMMED' "${JA_PWROPTION}" && \
-			sys_active_jobs=0 || \
-			sys_active_jobs="$(awk '$5 != "1" {c++} END{print c+0}' "${JA_TMP}jobs_active.lst")"
-
-		if [ -s "${JA_PWROPTION}" ] && \
-		( ! _subprocess_active "pwrdwnsys.watch_idle.pid" || \
-		[ -s "${JA_TMP}pwrdwnsys.idle" ] ) && \
-		[ ${sys_active_jobs} -eq 0 ]; then
+		if ! _subprocess_active "pwrdwnsys.pid" && \
+		_system_idle; then
 			sleep 1
 			if ! grep -qswF 'IMMED' "${JA_PWROPTION}" && \
 			_systemd_inhibited; then
 				_pipe_daemon_write "_inhibit_watchdog" &
 				continue
 			fi
-			_pipe_daemon_write "_pwroff" &
+			_pipe_daemon_write "_sync" "_pwroff" &
 		fi
 	done
 	:
@@ -2032,6 +2046,12 @@ _jobadmin_daemon() {
 			if ! _subprocess_active "pwrdwnsys.pid"; then
 				_jobadmin_pwroff &
 				echo ${!} > "${JA_TMP}pwrdwnsys.pid"
+			fi
+			;;
+		_sync)
+			if ! _subprocess_active "sync.pid"; then
+				_jobadmin_sync &
+				echo ${!} > "${JA_TMP}sync.pid"
 			fi
 			;;
 		_jobadmin) # normal message, new interval

@@ -14,21 +14,22 @@ Depends: ${misc:Depends},
  bash (>= 5.0),
  ed,
  gawk,
- cgroup-bin (<= 0.38-3) | cgroup-tools | systemd-sysv,
  dialog (>= 1.2-20130523-1),
  acl,
  getopt-sh,
  screen,
  inotify-tools,
- xprintidle,
 Recommends: libnotify-bin, notification-daemon,
  lsof,
  xdotool,
- most, cups, cups-client,
+ most,
  gnome-icon-theme | adwaita-icon-theme,
- aria2, curl, wget, youtube-dl,
- miniupnpc, live-net-initramfs,
+ x11-xserver-utils,
+ xprintidle,
 Suggests:
+ aria2, curl, wget, youtube-dl,
+ cups, cups-client,
+ miniupnpc, live-net-initramfs,
 Description: Linux jobs manager.
  Jobadmin is an utility to manage system jobs in IBM/AS400 style. Is 
  intended for a single computer with multiple users; the users can be 
@@ -48,4 +49,5 @@ Architecture: all
 Depends: ${misc:Depends},
  jobadmin,
  sysvinit-core, sysvinit-utils,
+ cgroup-bin (<= 0.38-3) | cgroup-tools,
 Description: Jobadmin's sysvinit specific files.

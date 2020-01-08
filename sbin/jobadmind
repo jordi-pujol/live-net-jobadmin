@@ -600,7 +600,7 @@ _jobadmin_job_end() {
 		_log "_jobadmin_job_end: END '${job}.${usr}.${job_pid}'"
 }
 
-# this procedure is executed by the user of that job
+# this procedure is executed by the user of a job
 # Prepares the environment and executes the job
 _jobadmin_exec() {
 	local JA_JOB JA_USR
@@ -815,7 +815,7 @@ _inhibit_watchdog() {
 	while _systemd_inhibited; do
 		sleep 1
 	done
-	_pipe_daemon_write "jobadmin"
+	_pipe_daemon_write "_jobadmin"
 	:
 }
 
@@ -1765,9 +1765,10 @@ _jobadmin_watch_idle() {
 				wt=$((working_time-Wt))
 				it=$((idle_time-It))
 				ipc=$((it*100/(wt+it)))
-				#echo "wt=$wt it=$it ipc=$ipc" >&2
-				[ ${ipc} -ge ${JA_CPU_IDLE} ] || \
+				if [ ${ipc} -lt ${JA_CPU_IDLE} ]; then
 					doing_some_work="y"
+					#echo "wt=$wt it=$it ipc=$ipc" >&2
+				fi
 			fi
 			Wt=${working_time}
 			It=${idle_time}
@@ -1780,13 +1781,17 @@ _jobadmin_watch_idle() {
 				< "/sys/class/block/${disk}/stat"; then
 					dr=$((dr+readb))
 					dw=$((dw+writeb))
-					[ ${inflight} -eq 0 ] || \
+					if [ ${inflight} -ne 0 ]; then
 						doing_some_work="y"
+						#echo "inflight=$inflight" >&2
+					fi
 				fi
 			done
 			if [ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
-				[ $(((dr+dw-Dr-Dw)/interval)) -le 32 ] || \
+				if [ $(((dr+dw-Dr-Dw)/interval)) -gt 2048 ]; then
 					doing_some_work="y"
+					#echo "disk=$(((dr+dw-Dr-Dw)/interval))" >&2
+				fi
 			fi
 			Dr=${dr}
 			Dw=${dw}
@@ -1802,8 +1807,10 @@ _jobadmin_watch_idle() {
 				fi
 			done
 			if [ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
-				[ $(((nr+nt-Nr-Nt)/interval)) -le 256 ] || \
+				if [ $(((nr+nt-Nr-Nt)/interval)) -gt 256 ]; then
 					doing_some_work="y"
+					#echo "network=$(((nr+nt-Nr-Nt)/interval))" >&2
+				fi
 			fi
 			Nr=${nr}
 			Nt=${nt}
@@ -1827,11 +1834,23 @@ _jobadmin_watch_idle() {
 				/proc/${pid_sess}/environ | tr -d '\0')"; then
 					export DISPLAY="${terminal}"
 					export "${DBUS_SESSION_BUS_ADDRESS}"
-					if timeslice="$(_sudo "${usr}" xprintidle)"; then
-						if [ ${timeslice} -le 20000 ]; then
+					# Monitor is On, Standby, Suspend, Off
+					if ! dspstat="$(_sudo "${usr}" xset q)" || \
+					grep -qsF "Monitor is On" <<< "${dspstat}"; then
+						if xprintidle="$(which xprintidle)" && \
+						timeslice="$(_sudo "${usr}" "${xprintidle}")"; then
+							if [ ${timeslice} -le 20000 ]; then
+								doing_some_work="y"
+								#echo "display=${timeslice}" >&2
+								break
+							fi
+						elif grep -qsF "Monitor is On" <<< "${dspstat}"; then
 							doing_some_work="y"
+							#echo "display=Monitor is On" >&2
 							break
 						fi
+					#else
+						#echo "display=$(grep -sF "Monitor is" <<< "${dspstat}")" >&2
 					fi
 				fi
 				unset terminal
@@ -1922,7 +1941,6 @@ _jobadmin_monitor() {
 
 		if ! _subprocess_active "pwrdwnsys.pid" && \
 		_system_idle; then
-			sleep 1
 			if ! grep -qswF 'IMMED' "${JA_PWROPTION}" && \
 			_systemd_inhibited; then
 				_pipe_daemon_write "_inhibit_watchdog" &

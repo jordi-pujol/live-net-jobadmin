@@ -828,7 +828,7 @@ _jobadmin_notify_loggedinusrs() {
 	shift
 	msg="${@}"
 
-	for usr in $(_system_users); do
+	for usr in $(users); do
 		notifyID="$(awk -v usr="${usr}" '$1 == usr {print $2; exit}' \
 			"${JA_TMP}pwrdwnsys.notifyIDs")"
 		[ "${notifyID}" != "0" ] || \
@@ -860,7 +860,7 @@ _jobadmin_resume_offset() {
 			awk '$1 == "0" {print $2+0; rc=-1; exit}
 			END{exit rc+1}')" || \
 				return 0
-		echo "${resume_offset}" > /sys/power/resume_offset
+		echo "${resume_offset}" > "/sys/power/resume_offset"
 		sw_filename="$(df "${sw_filename}" | awk 'NR == 2 {print $1}')"
 	fi
 	[ -b "${sw_filename}" ] || \
@@ -1744,7 +1744,7 @@ _jobadmin_wtrs_check() {
 }
 
 _jobadmin_watch_idle() {
-	local interval=0 doing_some_work \
+	local check_idle interval=0 doing_some_work \
 		Wt=0 It=0 \
 		Dr=0 Dw=0 \
 		Nr=0 Nt=0
@@ -1753,10 +1753,18 @@ _jobadmin_watch_idle() {
 	: > "${JA_TMP}pwrdwnsys.idle"
 	_enable_daemon_debug "" "${JA_LOG}-watch_idle.xtrace"
 
+	check_idle="$(_read_option "JA_IDLES" "${JA_PWRATTRS}")" || \
+		return 0
+	[ "${check_idle}" != "all" ] || \
+		check_idle="${JA_IDLE}"
+	check_idle="$(grep -swiF "$(tr -s ',[:blank:]' '\n' <<< "${JA_IDLE}")" \
+	<<< "$(tr -s ',[:blank:]' '\n' <<< "${check_idle}")")" || \
+		return 0
+
 	while [ -s "${JA_PWROPTION}" ]; do
 		doing_some_work=""
 		if [ ${JA_CPU_IDLE:-0} -gt 0 ] && \
-		grep -qswiF "cpu" <<< "${JA_IDLE}" && \
+		grep -qswiF "cpu" <<< "${check_idle}" && \
 		read -r cpu usr nic sys idle iowait irq softirq steal rest \
 		< /proc/stat; then
 			working_time=$((usr+nic+sys+irq+softirq+steal))
@@ -1773,7 +1781,7 @@ _jobadmin_watch_idle() {
 			Wt=${working_time}
 			It=${idle_time}
 		fi
-		if grep -qswiF "disk" <<< "${JA_IDLE}"; then
+		if grep -qswiF "disk" <<< "${check_idle}"; then
 			local dr=0 dw=0
 			for disk in $(basename -a $(df | awk 'NR > 1 {print $1}') | sort -u); do
 				if [ -e "/sys/class/block/${disk}/stat" ] && \
@@ -1796,7 +1804,7 @@ _jobadmin_watch_idle() {
 			Dr=${dr}
 			Dw=${dw}
 		fi
-		if grep -qswiF "network" <<< "${JA_IDLE}"; then
+		if grep -qswiF "network" <<< "${check_idle}"; then
 			local nr=0 nt=0
 			for iface in $(_expand_glob "/sys/class/net/*"); do
 				if [ -e "${iface}/statistics/rx_bytes" ] && \
@@ -1815,7 +1823,7 @@ _jobadmin_watch_idle() {
 			Nr=${nr}
 			Nt=${nt}
 		fi
-		if grep -qswiF "X" <<< "${JA_IDLE}" && \
+		if grep -qswiF "X" <<< "${check_idle}" && \
 		[ -z "${doing_some_work}" -a ${interval} -gt 0 ]; then
 			unset terminal
 			while read -r terminal; do
@@ -1837,8 +1845,8 @@ _jobadmin_watch_idle() {
 					# Monitor is On, Standby, Suspend, Off
 					if ! dspstat="$(_sudo "${usr}" xset q)" || \
 					grep -qsF "Monitor is On" <<< "${dspstat}"; then
-						if xprintidle="$(which xprintidle)" && \
-						timeslice="$(_sudo "${usr}" "${xprintidle}")"; then
+						if [ -n "${JA_XPRINTIDLE}" ] && \
+						timeslice="$(_sudo "${usr}" "${JA_XPRINTIDLE}")"; then
 							if [ ${timeslice} -le 20000 ]; then
 								doing_some_work="y"
 								#echo "display=${timeslice}" >&2

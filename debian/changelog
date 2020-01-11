@@ -1,4 +1,4 @@
-jobadmin (1.85) UNRELEASED; urgency=medium
+jobadmin (1.85) unstable; urgency=medium
 
   * synchronize disks before system poweroff.
 

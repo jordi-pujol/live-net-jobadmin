@@ -42,6 +42,10 @@ JA_XCMDEDIT=""
 #		JA_XCMDEDIT="$editor --no-session --new-instance --read-only"
 #fi
 
+# command to check X screen activity;
+#JA_XPRINTIDLE="$(which xprintidle || :)"
+JA_XPRINTIDLE=""
+
 # x-terminal-emulator
 # xfce4-terminal is preferred, you must use it if possible.
 #

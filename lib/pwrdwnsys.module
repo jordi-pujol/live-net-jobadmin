@@ -53,6 +53,7 @@ pwrdwnsys -o|--option immed -d|--delay 30 -r|--restart hibernate
 _pwrdwnsys_options="JA_OPTION pr@
 JA_RESTART pr@
 JA_DELAY r@
+JA_IDLES@
 JA_PERSIST"
 
 _pwrdwnsys() {
@@ -73,10 +74,12 @@ _pwrdwnsys() {
 				pwr_delay=0
 			pwr_pid="$(_read_option "JA_PID" "${JA_PWRATTRS}")" || :
 			pwr_persist="$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" || :
+			pwr_idles="$(_read_option "JA_IDLES" "${JA_PWRATTRS}")" || :
 			_usr_notify "Power down system option '${pwr_option}' is \
 '$(test -s "${JA_PWROPTION}" && printf '%s' "enabled" || printf '%s' "disabled")' \
 for ${pwr_restart}\
 $(test ${pwr_delay} -eq 0 || echo ", ${pwr_delay} seconds delayed")\
+$(test -z "${pwr_idles}" || echo ", check-idle ${pwr_idles}")\
 $(test -z "${pwr_persist}" || echo ", persistent")." 2>&1
 		else
 			_usr_notify "Power down system is disabled." 2>&1
@@ -111,15 +114,19 @@ $(test -z "${pwr_persist}" || echo ", persistent")." 2>&1
 	truncate -s 0 "${JA_PWRATTRS}"
 	_set_option "${JA_PWRATTRS}" "JA_USR" "${JA_USRACT}"
 	_set_option "${JA_PWRATTRS}" "JA_OPTION" "${JA_OPTION}"
-	_set_option "${JA_PWRATTRS}" "JA_DELAY" "${JA_DELAY}"
 	_set_option "${JA_PWRATTRS}" "JA_RESTART" "${JA_RESTART}"
-	_set_option "${JA_PWRATTRS}" "JA_PERSIST" "$(test "${JA_PERSIST}" != "Yes" || echo "Yes")"
+	_set_option "${JA_PWRATTRS}" "JA_DELAY" "${JA_DELAY}"
+	[ -z "${JA_IDLES}" ] || \
+		_set_option "${JA_PWRATTRS}" "JA_IDLES" "${JA_IDLES}"
+	[ "${JA_PERSIST}" != "Yes" ] || \
+		_set_option "${JA_PWRATTRS}" "JA_PERSIST" "${JA_PERSIST}"
 
 	printf '%s\n' "${JA_OPTION}" > "${JA_PWROPTION}"
 
 	if _pipe_write "_jobadmin"; then
 		_usr_notify "Power down system ${JA_OPTION} for ${JA_RESTART}\
 $(test ${JA_DELAY} -eq 0 || echo ", ${JA_DELAY} seconds delayed")\
+$(test -z "${pwr_idles}" || echo ", check-idle ${pwr_idles}")\
 $(test "${JA_PERSIST}" != "Yes" || echo ", persistent")."
 	fi
 } # pwrdwnsys

@@ -1,6 +1,9 @@
 jobadmin (1.85) unstable; urgency=medium
 
   * synchronize disks before system poweroff.
+  * pwrdwnsys command: new option check-idle system, only
+    valid when requesting a controlled option,
+    check-idle system is disabled by default.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 01 Jan 2020 09:46:51 +0100
 

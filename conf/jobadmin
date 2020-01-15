@@ -42,10 +42,6 @@ JA_XCMDEDIT=""
 #		JA_XCMDEDIT="$editor --no-session --new-instance --read-only"
 #fi
 
-# command to check X screen activity;
-#JA_XPRINTIDLE="$(which xprintidle || :)"
-JA_XPRINTIDLE=""
-
 # x-terminal-emulator
 # xfce4-terminal is preferred, you must use it if possible.
 #
@@ -132,10 +128,13 @@ fi
 readonly JA_CGEXEC JA_CGEXEC_INTER
 
 # Power management
-# Check cpu time, disk read/write, network traffic and X change
-#    before starting execution of a controlled pwrdwnsys command.
+# Check cpu time, disk read/write, network traffic and X activity
+#    before starting execution of a "controlled pwrdwnsys" command.
 #JA_IDLE="cpu,disk,network,X"
 JA_IDLE="cpu,disk,network,X"
+# command to check X screen activity; blank if not available
+#JA_XPRINTIDLE="$(which xprintidle || :)"
+JA_XPRINTIDLE=""
 
 # commands are executed by the jobadmin daemon, user root
 # KDE4, ConsoleKit, UPower

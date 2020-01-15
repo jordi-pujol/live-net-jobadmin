@@ -56,8 +56,16 @@ JA_DELAY r@
 JA_IDLES@
 JA_PERSIST"
 
+_pwrdwnsys_report() {
+	_usr_notify "Power down system option '${JA_OPTION}' is \
+'$(test -s "${JA_PWROPTION}" && printf '%s' "enabled" || printf '%s' "disabled")' \
+for ${JA_RESTART}\
+$(test ${JA_DELAY} -eq 0 || echo ", ${JA_DELAY} seconds delayed")\
+$(test -z "${JA_IDLES}" || echo ", check-idle ${JA_IDLES}")\
+$(test -z "${JA_PERSIST}" || echo ", persistent")." 2>&1
+}
+
 _pwrdwnsys() {
-	local pwr_delay pwr_option pwr_pid pwr_restart l
 
 	# permission to access this file is not correctly checked
 	# until the program executes this command
@@ -68,19 +76,14 @@ _pwrdwnsys() {
 		return 1
 	fi
 	if [ "${JA_OPTION}" = "STATUS" ]; then
-		if pwr_option="$(_read_option "JA_OPTION" "${JA_PWRATTRS}")"; then
-			pwr_restart="$(_read_option "JA_RESTART" "${JA_PWRATTRS}")" || :
-			pwr_delay="$(_read_option "JA_DELAY" "${JA_PWRATTRS}")" || \
-				pwr_delay=0
-			pwr_pid="$(_read_option "JA_PID" "${JA_PWRATTRS}")" || :
-			pwr_persist="$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" || :
-			pwr_idles="$(_read_option "JA_IDLES" "${JA_PWRATTRS}")" || :
-			_usr_notify "Power down system option '${pwr_option}' is \
-'$(test -s "${JA_PWROPTION}" && printf '%s' "enabled" || printf '%s' "disabled")' \
-for ${pwr_restart}\
-$(test ${pwr_delay} -eq 0 || echo ", ${pwr_delay} seconds delayed")\
-$(test -z "${pwr_idles}" || echo ", check-idle ${pwr_idles}")\
-$(test -z "${pwr_persist}" || echo ", persistent")." 2>&1
+		if JA_OPTION="$(_read_option "JA_OPTION" "${JA_PWRATTRS}")"; then
+			JA_RESTART="$(_read_option "JA_RESTART" "${JA_PWRATTRS}")" || :
+			JA_DELAY="$(_read_option "JA_DELAY" "${JA_PWRATTRS}")" || \
+				JA_DELAY=0
+			JA_PID="$(_read_option "JA_PID" "${JA_PWRATTRS}")" || :
+			JA_PERSIST="$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" || :
+			JA_IDLES="$(_read_option "JA_IDLES" "${JA_PWRATTRS}")" || :
+			_pwrdwnsys_report
 		else
 			_usr_notify "Power down system is disabled." 2>&1
 		fi
@@ -124,9 +127,6 @@ $(test -z "${pwr_persist}" || echo ", persistent")." 2>&1
 	printf '%s\n' "${JA_OPTION}" > "${JA_PWROPTION}"
 
 	if _pipe_write "_jobadmin"; then
-		_usr_notify "Power down system ${JA_OPTION} for ${JA_RESTART}\
-$(test ${JA_DELAY} -eq 0 || echo ", ${JA_DELAY} seconds delayed")\
-$(test -z "${pwr_idles}" || echo ", check-idle ${pwr_idles}")\
-$(test "${JA_PERSIST}" != "Yes" || echo ", persistent")."
+		_pwrdwnsys_report
 	fi
 } # pwrdwnsys

@@ -524,7 +524,7 @@ _jobadmin_job_end() {
 		cause="CAN"
 	job_pids="$(_read_option "JA_EXECS" "${attrs}")" || :
 	# associate the cause to the corresponding pid
-	if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:blank:]]*| \
+	if ja_pids="$(sed -nre "\|\b("${job_pid}")\b[^[:space:]]*| \
 	{s||\1:"${cause}"|p;q0};q1" <<< "${job_pids}")"; then
 		_set_option "${attrs}" "JA_EXECS" "${ja_pids}"
 	else
@@ -1757,8 +1757,8 @@ _jobadmin_watch_idle() {
 		return 0
 	[ "${check_idle}" != "all" ] || \
 		check_idle="${JA_IDLE}"
-	check_idle="$(grep -swiF "$(tr -s ',[:blank:]' '\n' <<< "${JA_IDLE}")" \
-	<<< "$(tr -s ',[:blank:]' '\n' <<< "${check_idle}")")" || \
+	check_idle="$(grep -swiF "$(tr -s ',[:space:]' '\n' <<< "${JA_IDLE}")" \
+	<<< "$(tr -s ',[:space:]' '\n' <<< "${check_idle}")")" || \
 		return 0
 
 	while [ -s "${JA_PWROPTION}" ]; do

@@ -1,3 +1,16 @@
+jobadmin (1.87) unstable; urgency=medium
+
+  * sbin/jobadmind:
+    kill LXDE sessions before stopping the system
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 03 Apr 2020 21:38:42 +0200
+
+jobadmin (1.86) unstable; urgency=medium
+
+  * lpstat is not required, optional only
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 26 Feb 2020 08:40:02 +0100
+
 jobadmin (1.85) unstable; urgency=medium
 
   * synchronize disks before system poweroff.

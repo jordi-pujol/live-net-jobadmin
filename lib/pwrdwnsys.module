@@ -43,7 +43,7 @@ pwrdwnsys -o|--option immed -d|--delay 30 -r|--restart hibernate
 		and the system is idle (as set in the default parameters)
 	CANCEL - cancel a previous request of pwrdwnsys not yet executed
 	STATUS - show actual pwrdwnsys status
--r|--restart 'POWEROFF|HALT|REBOOT|SUSPEND|HIBERNATE'
+-r|--restart 'POWEROFF|HALT|REBOOT|SUSPEND|HIBERNATE|HYBRID-SLEEP'
 	method used to shutdown/restart
 -d|--delay '30'
 	seconds waiting for new pending jobs or some user action.
@@ -113,6 +113,9 @@ _pwrdwnsys() {
 	[ -n "$(_read_option "JA_PERSIST" "${JA_PWRATTRS}")" ]; then
 		_usr_notify "Error: Power down system is enabled now, please cancel it before changing options."
 		return 1
+	fi
+	if [ "${JA_OPTION}" != "CNTRLD" -a -n "${JA_IDLES}" ]; then
+		_usr_notify "Warning: Only option CNTRLD will wait for an idle system."
 	fi
 	truncate -s 0 "${JA_PWRATTRS}"
 	_set_option "${JA_PWRATTRS}" "JA_USR" "${JA_USRACT}"

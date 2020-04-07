@@ -60,7 +60,7 @@ _UTCseconds() {
 }
 
 _datetime() {
-	date +'%Y-%m-%d %H:%M:%S' "${@}"
+	date +'%F %X' "${@}"
 }
 
 _flock_lckfile() {

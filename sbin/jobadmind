@@ -94,6 +94,21 @@ _test_usr_dir() {
 			[ "${usr}" != "root" ] || \
 				chown root:root "${usr_dir}"
 		fi
+		usr_link="${JA_SPOOL}${usr}.usr"
+		if [ ! -L "${usr_link}" ]; then
+			[ ! -e "${usr_link}" ] || \
+				mv -f "${usr_link}" \
+					"$(mktemp --dry-run "${usr_link}-XXX")"
+			ln -s "${usr_dir}" "${usr_link}"
+			( set +o noglob
+			( ls -L1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \
+			tr -s '\n' '\000' | \
+			xargs -r0 basename -s '.usr' ) | \
+			sort | \
+			_comma_separated > "${JA_TMP}users.lst"
+		fi
+		getfacl="$(which getfacl)" || \
+			continue
 		! getfacl "${usr_dir}" 2> /dev/null | grep -qxse '# group: adm' || \
 			_log "Error: Group 'adm' can't be main group of directory" \
 				"'${usr_dir}' for user: '${usr}'."
@@ -111,19 +126,6 @@ _test_usr_dir() {
 			setfacl --recursive --modify "group:adm:${perm}" "${usr_dir}" || \
 			_log "Error: Can't set ACL's in device" \
 				"'$(df "${usr_dir}" | awk 'NR == 2 {print $1}')'."
-		fi
-		usr_link="${JA_SPOOL}${usr}.usr"
-		if [ ! -L "${usr_link}" ]; then
-			[ ! -e "${usr_link}" ] || \
-				mv -f "${usr_link}" \
-					"$(mktemp --dry-run "${usr_link}-XXX")"
-			ln -s "${usr_dir}" "${usr_link}"
-			( set +o noglob
-			( ls -L1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \
-			tr -s '\n' '\000' | \
-			xargs -r0 basename -s '.usr' ) | \
-			sort | \
-			_comma_separated > "${JA_TMP}users.lst"
 		fi
 	done
 	:
@@ -606,7 +608,7 @@ _jobadmin_exec() {
 	local JA_JOB JA_USR
 	local job_pid pidfile job_pids cancelled JA_USR_DIR JA_JOB_DIR attrs attrs_exec d
 	local rc cause timestart inter ljoin outq outpty
-	local splf_sav splf_stdout splf_stderr fd1 fd2 fd3 fd4
+	local splf_sav splf_stdout splf_stderr splf_xtrace fd1 fd2 fd3 fd4
 
 	JA_JOB="${1}"
 	JA_USR="${2}"
@@ -684,17 +686,17 @@ _jobadmin_exec() {
 			_pipe_write "_job_watchdog:${JA_JOB}:${JA_USR}:${job_pid}" &
 
 			splf_sav="$(_read_option "JA_SPLFSAV" "${attrs}")" || :
-			if [ -n "${JA_DEBUG:-}" ]; then
-				_set_option "${splf_xtrace}.splfa" "JA_SPLF" \
-					"$(basename "${splf_xtrace}").splf"
-				_set_option "${splf_xtrace}.splfa" "JA_OUTQ" "${outq}"
-				_set_option "${splf_xtrace}.splfa" "JA_SPLF_STS" "OPN"
-				_set_option "${splf_xtrace}.splfa" "JA_DATESBM" "${timestart}"
-				_set_option "${splf_xtrace}.splfa" "JA_OUTPTY" "${outpty}"
-				_set_option "${splf_xtrace}.splfa" "JA_SUDO_USR" "${sudo_user}"
-				[ -z "${splf_sav}" ] || \
-					_set_option "${splf_xtrace}.splfa" "JA_SAVED" "Yes"
-			fi
+#			if [ -n "${JA_DEBUG:-}" ]; then
+#				_set_option "${splf_xtrace}.splfa" "JA_SPLF" \
+#					"$(basename "${splf_xtrace}").splf"
+#				_set_option "${splf_xtrace}.splfa" "JA_OUTQ" "${outq}"
+#				_set_option "${splf_xtrace}.splfa" "JA_SPLF_STS" "OPN"
+#				_set_option "${splf_xtrace}.splfa" "JA_DATESBM" "${timestart}"
+#				_set_option "${splf_xtrace}.splfa" "JA_OUTPTY" "${outpty}"
+#				_set_option "${splf_xtrace}.splfa" "JA_SUDO_USR" "${sudo_user}"
+#				[ -z "${splf_sav}" ] || \
+#					_set_option "${splf_xtrace}.splfa" "JA_SAVED" "Yes"
+#			fi
 
 			splf_stdout="${JA_JOB_DIR}job-${job_pid}-stdout"
 			if [ -n "${ljoin}" ]; then
@@ -738,11 +740,13 @@ _jobadmin_exec() {
 			else
 				rc="${?}"
 				cause="ERR"
+				[ ! -d "/run/systemd/system" ] || \
+					systemctl reset-failed
 			fi
 
 			timestart="$(($(_UTCseconds)-${timestart}))"
 			printf '%s seconds = %s.\n' "${timestart}" \
-				"$(date --date=@$((${timestart}-3600)) "+%kh%Mm%Ss")" >&2
+				"$(date --utc --date=@${timestart} "+%kh%Mm%Ss")" >&2
 			_set_option "${attrs}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_JOB_STS" "END"
 			_set_option "${attrs_exec}" "JA_CAUSE" "${cause}"
@@ -959,16 +963,17 @@ _jobadmin_pwroff() {
 	printf '%s\n' "#!/bin/sh"
 	printf 'unlink %s\n' "${JA_TMP}pwrdwnsys.sh"
 	case "${pwr_restart}" in
-	REBOOT)
-		[ -z "${immed}" ] && \
-			printf '%s\n' "${JA_CMD_REBOOT}" || \
-			printf '%s\n' "${JA_CMD_REBOOT_IMMED:-"${JA_CMD_REBOOT}"}"
-		;;
 	SUSPEND)
 		_jobadmin_resume_offset
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_SUSPEND}" || \
 			printf '%s\n' "${JA_CMD_SUSPEND_IMMED:-"${JA_CMD_SUSPEND}"}"
+		;;
+	HYBRID-SLEEP)
+		_jobadmin_resume_offset
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_HYBRID_SLEEP}" || \
+			printf '%s\n' "${JA_CMD_HYBRID_SLEEP_IMMED:-"${JA_CMD_HYBRID_SLEEP}"}"
 		;;
 	HIBERNATE)
 		_jobadmin_resume_offset
@@ -976,12 +981,20 @@ _jobadmin_pwroff() {
 			printf '%s\n' "${JA_CMD_HIBERNATE}" || \
 			printf '%s\n' "${JA_CMD_HIBERNATE_IMMED:-"${JA_CMD_HIBERNATE}"}"
 		;;
+	REBOOT)
+		killall lxsession systemd lxqt-session xfce4-session || :
+		[ -z "${immed}" ] && \
+			printf '%s\n' "${JA_CMD_REBOOT}" || \
+			printf '%s\n' "${JA_CMD_REBOOT_IMMED:-"${JA_CMD_REBOOT}"}"
+		;;
 	HALT)
+		killall lxsession systemd lxqt-session xfce4-session || :
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_HALT}" || \
 			printf '%s\n' "${JA_CMD_HALT_IMMED:-"${JA_CMD_HALT}"}"
 		;;
 	*)
+		killall lxsession systemd lxqt-session xfce4-session || :
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_POWEROFF}" || \
 			printf '%s\n' "${JA_CMD_POWEROFF_IMMED:-"${JA_CMD_POWEROFF}"}"
@@ -1048,12 +1061,15 @@ _jobadmin_LoadConfig() {
 			"${JA_TMP}${conf}.lst"
 	done
 
-	prts=( $(lpstat -d | awk '{print $NF}') )
-	for prt in $(lpstat -a | awk '{print $1}' | sort); do
-		grep -qswe "${prt}" <<< "${prts[@]}" || \
-			prts+=( "${prt}" )
-	done
-	printf '%s\n' "${prts[@]}" > "${JA_TMP}rprts.lst"
+	if prts=( $(lpstat -d | awk '{print $NF}') ); then
+		for prt in $(lpstat -a | awk '{print $1}' | sort); do
+			grep -qswe "${prt}" <<< "${prts[@]}" || \
+				prts+=( "${prt}" )
+		done
+		printf '%s\n' "${prts[@]}" > "${JA_TMP}rprts.lst"
+	else
+		: > "${JA_TMP}rprts.lst"
+	fi
 
 	( set +o noglob
 	( ls -1d ${JA_SPOOL}*.usr 2> /dev/null || : ) | \

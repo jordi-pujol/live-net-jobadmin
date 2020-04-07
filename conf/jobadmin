@@ -158,8 +158,8 @@ JA_XPRINTIDLE=""
 #   echo platform > /sys/power/disk; echo disk > /sys/power/state
 
 if [ -d "/run/systemd/system" ]; then
-	JA_HIBERNATE="hybrid-sleep"
-	#JA_HIBERNATE="hibernate"
+	JA_HIBERNATE="hibernate"
+	JA_HYBRID_SLEEP="hybrid-sleep"
 	#JA_SUSPEND="hybrid-sleep"
 	JA_SUSPEND="suspend"
 
@@ -178,6 +178,10 @@ if [ -d "/run/systemd/system" ]; then
 	# hybrid-suspend
 	#JA_CMD_HIBERNATE="echo suspend > /sys/power/disk; echo disk > /sys/power/state"
 	#JA_CMD_HIBERNATE_IMMED="${JA_CMD_HIBERNATE}"
+
+	# hybrid-sleep
+	JA_CMD_HYBRID_SLEEP="systemctl ${JA_HYBRID_SLEEP}"
+	JA_CMD_HYBRID_SLEEP_IMMED="systemctl ${JA_HYBRID_SLEEP} --ignore-inhibitors"
 
 	JA_CMD_SUSPEND="systemctl ${JA_SUSPEND}"
 	JA_CMD_SUSPEND_IMMED="systemctl ${JA_SUSPEND} --ignore-inhibitors"

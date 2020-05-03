@@ -1,7 +1,7 @@
 jobadmin (1.87) unstable; urgency=medium
 
-  * sbin/jobadmind:
-    kill LXDE sessions before stopping the system
+  * pwrdwnsys:
+    restart option: new value to hybrid-sleep
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 03 Apr 2020 21:38:42 +0200
 

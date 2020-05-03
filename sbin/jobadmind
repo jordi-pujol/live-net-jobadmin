@@ -961,7 +961,12 @@ _jobadmin_pwroff() {
 
 	exec > "${JA_TMP}pwrdwnsys.sh"
 	printf '%s\n' "#!/bin/sh"
-	printf 'unlink %s\n' "${JA_TMP}pwrdwnsys.sh"
+	if [ -n "${JA_DEBUG_DAEMON}" ]; then
+		printf '%s\n' "exec > '${JA_LOG}-pwroff-exec.xtrace' 2>&1"
+		printf '%s\n' 'set -x'
+ 	else
+		printf  'unlink %s\n' "${JA_TMP}pwrdwnsys.sh"
+	fi
 	case "${pwr_restart}" in
 	SUSPEND)
 		_jobadmin_resume_offset
@@ -969,32 +974,29 @@ _jobadmin_pwroff() {
 			printf '%s\n' "${JA_CMD_SUSPEND}" || \
 			printf '%s\n' "${JA_CMD_SUSPEND_IMMED:-"${JA_CMD_SUSPEND}"}"
 		;;
-	HYBRID-SLEEP)
+	HYBRID*)
 		_jobadmin_resume_offset
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_HYBRID_SLEEP}" || \
 			printf '%s\n' "${JA_CMD_HYBRID_SLEEP_IMMED:-"${JA_CMD_HYBRID_SLEEP}"}"
 		;;
-	HIBERNATE)
+	HIBERN*)
 		_jobadmin_resume_offset
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_HIBERNATE}" || \
 			printf '%s\n' "${JA_CMD_HIBERNATE_IMMED:-"${JA_CMD_HIBERNATE}"}"
 		;;
 	REBOOT)
-		killall lxsession systemd lxqt-session xfce4-session || :
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_REBOOT}" || \
 			printf '%s\n' "${JA_CMD_REBOOT_IMMED:-"${JA_CMD_REBOOT}"}"
 		;;
 	HALT)
-		killall lxsession systemd lxqt-session xfce4-session || :
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_HALT}" || \
 			printf '%s\n' "${JA_CMD_HALT_IMMED:-"${JA_CMD_HALT}"}"
 		;;
 	*)
-		killall lxsession systemd lxqt-session xfce4-session || :
 		[ -z "${immed}" ] && \
 			printf '%s\n' "${JA_CMD_POWEROFF}" || \
 			printf '%s\n' "${JA_CMD_POWEROFF_IMMED:-"${JA_CMD_POWEROFF}"}"
@@ -1049,7 +1051,7 @@ _jobadmin_LoadConfig() {
 			"${JA_TMP}$(basename "${value}")"
 	done < <(_expand_glob "${JA_CONF_DIR}*.conf")
 
-	printf '%s\n' ",s/^JA_RESTART[[:blank:]].*/JA_RESTART * ${JA_CMD_REBOOT:+"REBOOT,"}${JA_CMD_SUSPEND:+"SUSPEND,"}${JA_CMD_HIBERNATE:+"HIBERNATE,"}${JA_CMD_HALT:+"HALT,"}${JA_CMD_POWEROFF:+"POWEROFF"}/g" 'w' | \
+	printf '%s\n' ",s/^JA_RESTART[[:blank:]].*/JA_RESTART * ${JA_CMD_REBOOT:+"REBOOT,"}${JA_CMD_SUSPEND:+"SUSPEND,"}${JA_CMD_HIBERNATE:+"HIBERNATE,"}${JA_CMD_HYBRID_SLEEP:+"HYBRID-SLEEP,"}${JA_CMD_HALT:+"HALT,"}${JA_CMD_POWEROFF:+"POWEROFF"}/g" 'w' | \
 	ed -s "${JA_CONF_PARMVALS}" 2> /dev/null || \
 		[ -z "${JA_DEBUG}" ] || \
 		eval "echo ed-$PS4" >&${bash_xtracefd} 2>&1
